@@ -1,0 +1,9 @@
+{
+  "_comment": "СМОДЕЛИРОВАННЫЕ ДАННЫЕ: имитация выгрузки расписания из информационной системы вуза. Время — местное (APP_UTC_OFFSET_HOURS). POST /api/events/lessons/import с заголовком X-Admin-Token; created_by — id существующего пользователя.",
+  "created_by": 1,
+  "is_simulated": true,
+  "lessons": [
+    {"name": "Математический анализ", "start_time": "2026-10-05T09:00:00", "duration_minutes": 90, "location": "А-250", "group": "ИВТ-11 (демо)", "reward_coins": 5, "reward_intelligence": 15, "reward_satisfaction": 8},
+    {"name": "Основы программирования", "start_time": "2026-10-05T10:40:00", "duration_minutes": 90, "location": "Б-114", "group": "ИВТ-11 (демо)", "reward_coins": 5, "reward_intelligence": 15, "reward_satisfaction": 8}
+  ]
+}

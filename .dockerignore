@@ -1,0 +1,21 @@
+# Контекст сборки backend-сервисов — корень репозитория.
+# Исключаем всё, что не нужно внутри образов.
+.git
+.github
+.env
+.env.*
+!.env.example
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/tests
+**/node_modules
+frontend
+docs
+monitoring
+gateway
+landing
+*.md
+*.log
+logs
+deploy_key*

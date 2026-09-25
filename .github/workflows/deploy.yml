@@ -1,0 +1,104 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  SERVER_HOST: levandrovskiy.ru
+  SERVER_USER: shureck
+  DEPLOY_PATH: /home/shureck/tamagotchi
+  GITHUB_REPO: ${{ github.repository }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ env.SERVER_HOST }} >> ~/.ssh/known_hosts
+          
+          # Создаём SSH config для удобства
+          cat >> ~/.ssh/config << EOF
+          Host ${{ env.SERVER_HOST }}
+            HostName ${{ env.SERVER_HOST }}
+            User ${{ env.SERVER_USER }}
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking no
+            UserKnownHostsFile ~/.ssh/known_hosts
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Test SSH connection
+        run: |
+          ssh -v -i ~/.ssh/deploy_key ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "echo 'SSH connection successful'"
+
+      - name: Clone or update repository on server
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} << EOF
+            set -e
+            REPO_URL="https://github.com/${{ env.GITHUB_REPO }}.git"
+            
+            if [ -d "${{ env.DEPLOY_PATH }}/.git" ]; then
+              echo "Repository exists, updating..."
+              cd ${{ env.DEPLOY_PATH }}
+              git pull
+            else
+              echo "Cloning repository..."
+              mkdir -p ${{ env.DEPLOY_PATH }}
+              cd ${{ env.DEPLOY_PATH }}
+              git clone \$REPO_URL .
+              git checkout ${{ github.ref_name }}
+            fi
+          EOF
+
+      - name: Deploy on server
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} << 'EOF'
+            set -e
+            cd ${{ env.DEPLOY_PATH }}
+            
+            # Останавливаем старые контейнеры
+            docker compose -f docker-compose.prod.yml down || true
+            
+            # ВАЖНО: Если изменился пароль БД, нужно пересоздать volume:
+            # docker volume rm tamagotchi_postgres_data || true
+            
+            # Удаляем старые образы (опционально, для экономии места)
+            # docker compose -f docker-compose.prod.yml down --rmi all || true
+            
+            # Собираем и запускаем новые контейнеры
+            docker compose -f docker-compose.prod.yml build --no-cache
+            docker compose -f docker-compose.prod.yml up -d
+            
+            # Очистка неиспользуемых образов
+            docker system prune -f
+            
+            # Проверка статуса
+            docker compose -f docker-compose.prod.yml ps
+          EOF
+
+      - name: Health check
+        run: |
+          sleep 15
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} << 'EOF'
+            cd ${{ env.DEPLOY_PATH }}
+            docker compose -f docker-compose.prod.yml ps
+            curl -f http://win.max.levandrovskiy.ru/health || exit 1
+            echo "Health check passed!"
+          EOF
+

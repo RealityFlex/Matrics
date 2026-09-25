@@ -1,0 +1,24 @@
+# Основные зависимости для всех микросервисов
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic[email]==2.5.0
+
+# Работа с базой данных
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+
+# Утилиты
+python-dotenv==1.0.0
+httpx==0.25.2
+qrcode[pil]==7.4.2
+
+# Тестовые зависимости
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+pytest-xdist==3.5.0
+faker==20.1.0
+aiosqlite==0.19.0
+

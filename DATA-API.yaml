@@ -1,0 +1,142 @@
+# DATA-API.yaml — обязательные проверки API решения «Матрикс»
+# Структура — по разделу «Только для решений с собственным API» ТЗ трека «Образовательные решения».
+# Спецификация всех методов: docs/openapi.json (OpenAPI 3.1).
+# Значения в <угловых скобках> подставляются из первого слайда презентации (тестовые учётные данные).
+
+config_version: "1.0"
+solution:
+  name: "Матрикс"
+  team: "RealityFlex"
+base_url: "<HTTPS-адрес стенда, например https://example.ru>"   # все пути ниже — относительно base_url
+
+roles:
+  admin:
+    description: "Преподаватель / администратор: показывает код и QR занятия"
+    headers:
+      X-Admin-Token: "<ADMIN_TOKEN со слайда 1>"
+  student:
+    description: "Студент (веб-демо, AUTH_MODE=lenient): действует от имени ?user_id; в MAX — заголовок X-Max-Init-Data"
+    test_user_id: "<id пользователя demo_student со слайда 1>"
+
+required_checks:
+  - id: schedule
+    title: "Расписание студента: текущая пара"
+    method: GET
+    path: "/api/events/schedule/users/{user_id}"
+    role: student
+    params:
+      path: { user_id: "<test_user_id>" }
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required_fields: [now, current, next, lessons, has_groups]
+
+  - id: lesson_code
+    title: "Текущий код и QR-диплинк занятия (экран преподавателя)"
+    method: GET
+    path: "/api/events/lessons/{lesson_id}/qr"
+    role: admin
+    params:
+      path: { lesson_id: "<current.id из проверки schedule>" }
+      headers: { X-Admin-Token: "<ADMIN_TOKEN>" }
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required_fields: [lesson_id, code, expires_in_seconds, window_seconds, payload, qr_code_data]
+
+  - id: lesson_code_forbidden
+    title: "Код занятия недоступен без токена администратора"
+    method: GET
+    path: "/api/events/lessons/{lesson_id}/qr"
+    role: student
+    params:
+      path: { lesson_id: "<current.id>" }
+    expected_status: [401]
+
+  - id: check_in
+    title: "Отметка на занятии (основной сценарий): награда + состояние персонажа"
+    method: POST
+    path: "/api/events/lessons/{lesson_id}/check-in"
+    role: student
+    params:
+      path: { lesson_id: "<current.id>" }
+      query: { user_id: "<test_user_id>" }
+      headers: { Content-Type: application/json }
+      body: { code: "<code из проверки lesson_code>", method: "code" }
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required_fields: [status, message, lesson, rewards, rewards_status, character, streak]
+      notes: "status = checked_in при первой отметке и already при повторной (награда выдаётся один раз)"
+
+  - id: check_in_wrong_code
+    title: "Неверный код отклоняется понятной ошибкой"
+    method: POST
+    path: "/api/events/lessons/{lesson_id}/check-in"
+    role: student
+    params:
+      path: { lesson_id: "<current.id>" }
+      query: { user_id: "<test_user_id>" }
+      body: { code: "0000", method: "code" }
+    expected_status: [400, 429]
+    response:
+      content_type: application/json
+      required_fields: [detail]
+
+  - id: character_after
+    title: "Персонаж после отметки: настроение, уровень, активные сеты"
+    method: GET
+    path: "/api/characters/user/{user_id}"
+    role: student
+    params:
+      path: { user_id: "<test_user_id>" }
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required_fields: [id, satisfaction, intelligence_level, intelligence_points, mood, growth_stage]
+
+  - id: streak
+    title: "Серия посещений и «дни без штрафа»"
+    method: GET
+    path: "/api/events/streaks/users/{user_id}"
+    role: student
+    params:
+      path: { user_id: "<test_user_id>" }
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required_fields: [current, best, lessons_attended, freezes_available, freezes_limit, pending_misses]
+
+  - id: wardrobe
+    title: "Каталог образов и локаций с прогрессом разблокировки"
+    method: GET
+    path: "/api/characters/appearance/catalog"
+    role: student
+    params:
+      query: { user_id: "<test_user_id>" }
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required_fields: [characters, environments]
+
+  - id: curator_attendance
+    title: "Дашборд куратора: посещаемость группы"
+    method: GET
+    path: "/api/statistics/stats/curator/groups/{group_id}/attendance"
+    role: admin
+    params:
+      path: { group_id: "<id группы «ИВТ-11 (демо)» со слайда 1>" }
+      headers: { X-Admin-Token: "<ADMIN_TOKEN>" }
+    expected_status: [200]
+    response:
+      content_type: application/json
+      required_fields: [group, lessons_total, members_total, attendance_rate, per_lesson, per_student]
+
+  - id: internal_blocked
+    title: "Внутренний сервис наград недоступен снаружи"
+    method: POST
+    path: "/api/rewards/grant"
+    role: student
+    params:
+      body: { user_id: 1, coins: 1000 }
+    expected_status: [404]

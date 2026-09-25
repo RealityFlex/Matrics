@@ -1,0 +1,445 @@
+# Общие переменные окружения для всех backend-сервисов (значения берутся из .env).
+# Секретов в этом файле нет: см. .env.example.
+x-app-env: &app-env
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}@postgres:5432/${POSTGRES_DB:-tamagotchi_db}
+  SQL_ECHO: ${SQL_ECHO:-false}
+  # Безопасность
+  ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+  AUTH_MODE: ${AUTH_MODE:-lenient}
+  CHECKIN_REQUIRE_MAX_AUTH: ${CHECKIN_REQUIRE_MAX_AUTH:-false}
+  ALLOW_DB_RESET: ${ALLOW_DB_RESET:-false}
+  # MAX
+  MAX_BOT_TOKEN: ${MAX_BOT_TOKEN:-}
+  MAX_BOT_USERNAME: ${MAX_BOT_USERNAME:-}
+  MAX_API_URL: ${MAX_API_URL:-https://platform-api.max.ru}
+  WEBAPP_URL: ${WEBAPP_URL:-}
+  # Посещаемость и серии
+  APP_UTC_OFFSET_HOURS: ${APP_UTC_OFFSET_HOURS:-3}
+  LESSON_CODE_WINDOW_SECONDS: ${LESSON_CODE_WINDOW_SECONDS:-30}
+  CHECKIN_ENFORCE_WINDOW: ${CHECKIN_ENFORCE_WINDOW:-true}
+  STREAK_FREEZES_PER_30D: ${STREAK_FREEZES_PER_30D:-2}
+  STREAK_FREEZE_DECISION_MIN: ${STREAK_FREEZE_DECISION_MIN:-720}
+  STREAK_MISS_GRACE_MIN: ${STREAK_MISS_GRACE_MIN:-15}
+  MISSED_LESSON_SATISFACTION_PENALTY: ${MISSED_LESSON_SATISFACTION_PENALTY:-10}
+  # LLM (опционально; без ключа используется детерминированная заглушка)
+  LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+
+services:
+  # База данных PostgreSQL
+  postgres:
+    image: postgres:15
+    container_name: tamagotchi_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (see .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-tamagotchi_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - tamagotchi_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-tamagotchi_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=postgres"
+
+  # User Service (порт 8001)
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user_service/Dockerfile
+    container_name: user_service
+    environment:
+      <<: *app-env
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - static_files:/app/static
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=user-service"
+
+  # Character Service (порт 8002)
+  character-service:
+    build:
+      context: .
+      dockerfile: services/character_service/Dockerfile
+    container_name: character_service
+    environment:
+      <<: *app-env
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=character-service"
+
+  # Reward Service (порт 8011)
+  reward-service:
+    build:
+      context: .
+      dockerfile: services/reward_service/Dockerfile
+    container_name: reward_service
+    environment:
+      <<: *app-env
+    ports:
+      - "8011:8011"
+    depends_on:
+      - user-service
+      - character-service
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=reward-service"
+
+  # Frontend (порт 3000)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - gateway
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=frontend"
+
+  # API Gateway (Caddy)
+  gateway:
+    image: caddy:2-alpine
+    container_name: api_gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./gateway/Caddyfile:/etc/caddy/Caddyfile
+      - ./gateway:/usr/share/caddy/gateway
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - user-service
+      - character-service
+      - reward-service
+      - task-service
+      - habit-service
+      - inventory-service
+      - achievement-service
+      - social-service
+      - event-service
+      - economy-service
+      - competition-service
+      - statistics-service
+      - notification-service
+      - max-bot-service
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=api-gateway"
+
+  # Task Service (порт 8003)
+  task-service:
+    build:
+      context: .
+      dockerfile: services/task_service/Dockerfile
+    container_name: task_service
+    environment:
+      <<: *app-env
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=task-service"
+
+  # Habit Service (порт 8004)
+  habit-service:
+    build:
+      context: .
+      dockerfile: services/habit_service/Dockerfile
+    container_name: habit_service
+    environment:
+      <<: *app-env
+    ports:
+      - "8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=habit-service"
+
+  # Inventory Service (порт 8005)
+  inventory-service:
+    build:
+      context: .
+      dockerfile: services/inventory_service/Dockerfile
+    container_name: inventory_service
+    environment:
+      <<: *app-env
+    ports:
+      - "8005:8005"
+    volumes:
+      - static_files:/app/static
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=inventory-service"
+
+  # Achievement Service (порт 8006)
+  achievement-service:
+    build:
+      context: .
+      dockerfile: services/achievement_service/Dockerfile
+    container_name: achievement_service
+    environment:
+      <<: *app-env
+    ports:
+      - "8006:8006"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=achievement-service"
+
+  # Social Service (порт 8007)
+  social-service:
+    build:
+      context: .
+      dockerfile: services/social_service/Dockerfile
+    container_name: social_service
+    environment:
+      <<: *app-env
+    ports:
+      - "8007:8007"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=social-service"
+
+  # Event Service (порт 8008)
+  event-service:
+    build:
+      context: .
+      dockerfile: services/event_service/Dockerfile
+    container_name: event_service
+    environment:
+      <<: *app-env
+    ports:
+      - "8008:8008"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=event-service"
+
+  # Economy Service (порт 8009)
+  economy-service:
+    build:
+      context: .
+      dockerfile: services/economy_service/Dockerfile
+    container_name: economy_service
+    environment:
+      <<: *app-env
+    ports:
+      - "8009:8009"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=economy-service"
+
+  # Competition Service (порт 8010)
+  competition-service:
+    build:
+      context: .
+      dockerfile: services/competition_service/Dockerfile
+    container_name: competition_service
+    environment:
+      <<: *app-env
+    ports:
+      - "8010:8010"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=competition-service"
+
+  # Statistics Service (порт 8012)
+  statistics-service:
+    build:
+      context: .
+      dockerfile: services/statistics_service/Dockerfile
+    container_name: statistics_service
+    environment:
+      <<: *app-env
+    ports:
+      - "8012:8012"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=statistics-service"
+
+  # Notification Service (порт 8013)
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification_service/Dockerfile
+    container_name: notification_service
+    ports:
+      - "8013:8013"
+    depends_on:
+      - user-service
+      - character-service
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=notification-service"
+
+  # MAX Bot Service (порт 8020)
+  max-bot-service:
+    build:
+      context: .
+      dockerfile: services/max_bot_service/Dockerfile
+    container_name: max_bot_service
+    environment:
+      <<: *app-env
+      LONG_POLLING_TIMEOUT: ${LONG_POLLING_TIMEOUT:-30}
+    ports:
+      - "8020:8020"
+    depends_on:
+      - postgres
+      - user-service
+      - character-service
+      - task-service
+      - inventory-service
+      - achievement-service
+    networks:
+      - tamagotchi_network
+    labels:
+      - "logging=promtail"
+      - "logging_jobname=max-bot-service"
+
+  # Loki - система хранения логов
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+      - ./monitoring/loki-config.yaml:/etc/loki/local-config.yaml
+    networks:
+      - tamagotchi_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Promtail - сборщик логов
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: promtail
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./monitoring/promtail-config.yaml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    networks:
+      - tamagotchi_network
+
+  # Grafana - визуализация логов
+  grafana:
+    image: grafana/grafana:10.1.0
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+      - ./monitoring/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
+      - ./monitoring/dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      - loki
+    networks:
+      - tamagotchi_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+  loki_data:
+  grafana_data:
+  static_files:
+
+networks:
+  tamagotchi_network:
+    driver: bridge
+

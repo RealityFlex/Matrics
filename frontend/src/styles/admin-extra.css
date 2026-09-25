@@ -1,0 +1,283 @@
+/*
+ * Админ-панель: дополнения к admin.css (иконки lucide, таблицы и карточки в модальных окнах,
+ * статистика, настройки). Только токены из tokens.css. Модальные окна рендерятся порталом
+ * в body, поэтому классы для них не привязаны к .admin-page.
+ */
+
+/* ---------- Шапка, навигация, заголовки ---------- */
+.admin-page .admin-header h1,
+.admin-page .section-header h2,
+.admin-page .section-header h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+.admin-page .admin-header h1 { color: var(--color-text); }
+.admin-page .admin-header h1 svg,
+.admin-page .section-header h2 svg { color: var(--color-primary-text); flex-shrink: 0; }
+.admin-page .nav-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    white-space: nowrap;
+}
+.admin-page .back-link { display: inline-flex; align-items: center; gap: var(--space-1); }
+.admin-page .section-header { gap: var(--space-3); flex-wrap: wrap; }
+.admin-page .section-header--sub { margin-bottom: var(--space-4); }
+.admin-block { margin-bottom: var(--space-8); }
+
+/* ---------- Таблицы ---------- */
+.admin-page td { vertical-align: top; }
+.admin-page .action-buttons { gap: var(--space-2); min-width: 220px; }
+.admin-cell-clip {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.admin-muted { color: var(--color-text-muted); }
+
+/* Показатели (StatValue) внутри админки: гасим старый крупный .admin-page .stat-value */
+.admin-page .reward-chip .ui-stat-value,
+.admin-page .admin-inline .ui-stat-value,
+.admin-modal .ui-stat-value {
+    font-size: inherit;
+    font-weight: inherit;
+    letter-spacing: normal;
+    line-height: inherit;
+    text-shadow: none;
+    color: inherit !important;
+}
+.admin-inline { display: inline-flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.admin-page .reward-chips { flex-wrap: nowrap; }
+
+/* Призовые места соревнований */
+.admin-prizes { display: flex; flex-direction: column; gap: 2px; font-variant-numeric: tabular-nums; }
+.admin-prize { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
+.admin-place {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-full);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    background: var(--color-surface-2);
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border);
+    flex-shrink: 0;
+}
+.admin-place--1 { color: var(--color-reward); background: var(--color-reward-soft); border-color: currentColor; }
+.admin-place--lg { width: 32px; height: 32px; font-size: var(--text-sm); }
+
+/* ---------- Статистика ---------- */
+.admin-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--space-4);
+    margin-top: var(--space-5);
+}
+.admin-stat-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-4);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+}
+.admin-stat-card__label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--color-text-secondary);
+}
+.admin-stat-card__label svg { color: var(--color-primary-text); }
+.admin-stat-card__value {
+    font-family: var(--font-heading);
+    font-size: var(--text-2xl);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text);
+}
+.admin-stat-card__hint { font-size: var(--text-xs); color: var(--color-text-muted); }
+
+/* ---------- Настройки ---------- */
+.admin-settings-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin-top: var(--space-5);
+    padding: var(--space-5);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+}
+.admin-settings-card--danger { border-color: var(--color-danger); }
+.admin-settings-card h3 { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-lg); }
+.admin-settings-card p { color: var(--color-text-secondary); font-size: var(--text-sm); }
+.admin-settings-card .ui-btn { align-self: flex-start; }
+.admin-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-3);
+    cursor: pointer;
+    font-size: var(--text-md);
+}
+.admin-toggle input { width: 20px; height: 20px; cursor: pointer; accent-color: var(--color-primary); }
+.admin-status-box {
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    border: 1px solid var(--color-border);
+    background: var(--color-surface-2);
+    color: var(--color-text);
+}
+.admin-status-box--on { background: var(--color-success-soft); border-color: var(--color-success); }
+.admin-status-box--off { background: var(--color-warning-soft); border-color: var(--color-warning); }
+.admin-danger-text { color: var(--color-danger); font-weight: 700; }
+.admin-success {
+    margin-top: var(--space-3);
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    background: var(--color-success-soft);
+    color: var(--color-success);
+    font-size: var(--text-sm);
+}
+
+/* ---------- Формы в модальных окнах ---------- */
+.admin-form .form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--space-3);
+}
+.admin-form .checkbox-group label,
+.admin-form .admin-checkbox {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    cursor: pointer;
+    color: var(--color-text);
+}
+.admin-form input[type='checkbox'] { width: 18px; height: 18px; padding: 0; flex-shrink: 0; accent-color: var(--color-primary); }
+.admin-modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-2);
+}
+.admin-modal-actions .ui-btn { min-width: 120px; }
+@media (max-width: 480px) {
+    .admin-modal-actions { flex-direction: column-reverse; }
+    .admin-modal-actions .ui-btn { width: 100%; }
+}
+
+/* ---------- Таблицы и блоки в модальных окнах ---------- */
+.admin-modal { display: flex; flex-direction: column; gap: var(--space-4); }
+.admin-modal h3 { font-size: var(--text-md); margin: 0 0 var(--space-2); }
+.admin-modal-table-wrap { overflow-x: auto; }
+.admin-modal-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.admin-modal-table th,
+.admin-modal-table td {
+    padding: var(--space-2);
+    text-align: left;
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: top;
+}
+.admin-modal-table th { color: var(--color-text-secondary); font-weight: 600; }
+.admin-modal-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.admin-note {
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    font-size: var(--text-sm);
+}
+
+/* Результаты соревнования */
+.admin-leaderboard { display: flex; flex-direction: column; gap: var(--space-2); }
+.admin-leader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+}
+.admin-leader__who { display: flex; align-items: center; gap: var(--space-2); }
+.admin-leader__value { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Карточка пользователя */
+.admin-detail-card {
+    padding: var(--space-4);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+}
+.admin-detail-card__title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-2);
+    font-size: var(--text-md);
+    color: var(--color-text);
+}
+.admin-detail-card__title svg { color: var(--color-primary-text); }
+.admin-detail-row {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2) 0;
+    border-bottom: 1px solid var(--color-border);
+    font-size: var(--text-sm);
+}
+.admin-detail-row:last-child { border-bottom: none; }
+.admin-detail-row__label { color: var(--color-text-secondary); }
+.admin-detail-row__value { font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+.admin-detail-list { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); max-height: 260px; overflow-y: auto; }
+.admin-detail-item {
+    padding: var(--space-2);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    font-size: var(--text-sm);
+}
+.admin-detail-item--done { border-color: var(--color-success); }
+.admin-detail-item__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--color-text);
+    font: inherit;
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+}
+.admin-detail-item__head:disabled { cursor: default; }
+.admin-detail-item__head svg { color: var(--color-text-muted); flex-shrink: 0; }
+.admin-detail-item__meta { margin-top: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted); }
+.admin-detail-item__meta--done { color: var(--color-success); }
+.admin-detail-item__desc {
+    margin-top: var(--space-2);
+    padding: var(--space-2);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-2);
+    color: var(--color-text-secondary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.admin-empty-note { padding: var(--space-3); text-align: center; font-size: var(--text-sm); color: var(--color-text-muted); }
+.admin-code__hint--center { margin: 0 auto; text-align: center; }
+.admin-icon-label { display: inline-flex; align-items: flex-start; gap: 6px; min-width: 140px; }
+.admin-icon-label svg { margin-top: 2px; flex-shrink: 0; }

@@ -1,0 +1,522 @@
+win.max.levandrovskiy.ru {
+    # CORS настройки
+    @cors_preflight method OPTIONS
+    handle @cors_preflight {
+        header Access-Control-Allow-Origin *
+        header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+        header Access-Control-Allow-Headers "Content-Type, Authorization, X-Max-Init-Data, X-Admin-Token"
+        respond 204
+    }
+
+    header Access-Control-Allow-Origin *
+    header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    header Access-Control-Allow-Headers "Content-Type, Authorization, X-Max-Init-Data, X-Admin-Token"
+
+    # Логирование
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+
+    # Админка по /admin (проксируем на frontend без изменения пути, так как nginx там уже настроен)
+    handle /admin* {
+        reverse_proxy frontend:80
+    }
+
+    # Мониторинг Grafana по /monitoring
+    handle /monitoring* {
+        uri strip_prefix /monitoring
+        reverse_proxy grafana:3000 {
+            header_up X-Forwarded-Prefix /monitoring
+            header_up Host {host}
+            header_up X-Real-IP {remote}
+            header_up X-Forwarded-For {remote}
+            header_up X-Forwarded-Proto https
+            header_up X-Forwarded-Host {host}
+            transport http {
+                dial_timeout 10s
+                response_header_timeout 30s
+            }
+        }
+    }
+
+    # API роуты по /api/*
+    handle /api/users* {
+        route {
+            # Внутренние межсервисные маршруты недоступны снаружи
+            @internal path_regexp internal ^/api/users/(\d+/coins/(add|subtract)|internal/.*)$
+            respond @internal "Not found" 404
+            uri strip_prefix /api
+            reverse_proxy user-service:8001 {
+                health_uri /health
+                health_interval 10s
+                health_timeout 5s
+                fail_duration 30s
+                max_fails 3
+                unhealthy_status 502 503 504
+            }
+        }
+    }
+
+    handle /api/characters* {
+        route {
+            # Внутренние межсервисные маршруты недоступны снаружи
+            @internal path_regexp internal ^/api/characters/(\d+/(satisfaction/adjust|intelligence/add|bonus/add)|user/\d+/appearance/check-unlocks)$
+            respond @internal "Not found" 404
+            uri strip_prefix /api
+            reverse_proxy character-service:8002
+        }
+    }
+
+    handle /api/tasks* {
+        uri strip_prefix /api
+        reverse_proxy task-service:8003
+    }
+
+    handle /api/habits* {
+        uri strip_prefix /api
+        reverse_proxy habit-service:8004
+    }
+
+    # Inventory Service (8005)
+    handle /api/inventory/trades* {
+        uri strip_prefix /api/inventory
+        reverse_proxy inventory-service:8005
+    }
+
+    handle /api/inventory/users* {
+        uri strip_prefix /api
+        reverse_proxy inventory-service:8005
+    }
+
+    handle /api/inventory/items* {
+        uri strip_prefix /api/inventory
+        reverse_proxy inventory-service:8005
+    }
+
+    handle /api/inventory* {
+        uri strip_prefix /api
+        reverse_proxy inventory-service:8005
+    }
+
+    handle /api/achievements* {
+        uri strip_prefix /api
+        reverse_proxy achievement-service:8006
+    }
+
+    handle /api/social* {
+        uri strip_prefix /api/social
+        reverse_proxy social-service:8007
+    }
+
+    handle /api/events* {
+        route {
+            # Внутренние межсервисные маршруты недоступны снаружи
+            @internal path_regexp internal ^/api/events/internal/.*$
+            respond @internal "Not found" 404
+            uri strip_prefix /api/events
+            reverse_proxy event-service:8008
+        }
+    }
+
+    handle /api/economy* {
+        uri strip_prefix /api/economy
+        reverse_proxy economy-service:8009
+    }
+
+    handle /api/competitions* {
+        uri strip_prefix /api/competitions
+        reverse_proxy competition-service:8010
+    }
+
+    handle /api/rewards* {
+        # Reward Service вызывается только другими сервисами внутри сети Docker
+        respond "Not found" 404
+    }
+
+    # Statistics Service (8012)
+    # Обрабатываем /api/stats* для обратной совместимости
+    handle /api/stats* {
+        uri strip_prefix /api
+        reverse_proxy statistics-service:8012
+    }
+    # Обрабатываем /api/statistics/stats* (предпочтительный путь)
+    handle /api/statistics/stats* {
+        uri strip_prefix /api/statistics
+        reverse_proxy statistics-service:8012
+    }
+    # Обрабатываем остальные пути /api/statistics*
+    handle /api/statistics* {
+        uri strip_prefix /api
+        reverse_proxy statistics-service:8012
+    }
+
+    handle /api/bot* {
+        route {
+            # Внутренние межсервисные маршруты недоступны снаружи
+            @internal path_regexp internal ^/api/bot/(notifications/.*|updates)$
+            respond @internal "Not found" 404
+            uri strip_prefix /api/bot
+            reverse_proxy max-bot-service:8020
+        }
+    }
+
+    # WebSocket realtime обновления (8013)
+    # Caddy автоматически обрабатывает WebSocket через reverse_proxy
+    handle /ws* {
+        reverse_proxy notification-service:8013 {
+            # WebSocket требует передачи правильных заголовков
+            header_up Host {host}
+            header_up X-Real-IP {remote}
+            header_up X-Forwarded-For {remote}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+            # Настройки транспорта для WebSocket
+            transport http {
+                dial_timeout 10s
+                response_header_timeout 30s
+            }
+        }
+    }
+
+    # Swagger документация для всех сервисов (обрабатываем ПЕРВЫМИ, более специфичные пути)
+    # User Service - обрабатываем openapi.json ПЕРЕД общим правилом
+    handle /docs/users/openapi.json {
+        uri strip_prefix /docs/users
+        rewrite * /openapi.json
+        reverse_proxy user-service:8001
+    }
+    
+    handle /docs/users* {
+        uri strip_prefix /docs/users
+        rewrite * /docs
+        reverse_proxy user-service:8001 {
+            header_up Host {host}
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # Character Service
+    handle /docs/characters/openapi.json {
+        uri strip_prefix /docs/characters
+        rewrite * /openapi.json
+        reverse_proxy character-service:8002
+    }
+    
+    handle /docs/characters* {
+        uri strip_prefix /docs/characters
+        rewrite * /docs
+        reverse_proxy character-service:8002 {
+            header_up Host {host}
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # Task Service
+    handle /docs/tasks/openapi.json {
+        uri strip_prefix /docs/tasks
+        rewrite * /openapi.json
+        reverse_proxy task-service:8003
+    }
+    
+    handle /docs/tasks* {
+        uri strip_prefix /docs/tasks
+        rewrite * /docs
+        reverse_proxy task-service:8003 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # Habit Service
+    handle /docs/habits/openapi.json {
+        uri strip_prefix /docs/habits
+        rewrite * /openapi.json
+        reverse_proxy habit-service:8004
+    }
+    
+    handle /docs/habits* {
+        uri strip_prefix /docs/habits
+        rewrite * /docs
+        reverse_proxy habit-service:8004 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # Inventory Service
+    handle /docs/inventory/openapi.json {
+        uri strip_prefix /docs/inventory
+        rewrite * /openapi.json
+        reverse_proxy inventory-service:8005
+    }
+    
+    handle /docs/inventory* {
+        uri strip_prefix /docs/inventory
+        rewrite * /docs
+        reverse_proxy inventory-service:8005 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # Achievement Service
+    handle /docs/achievements/openapi.json {
+        uri strip_prefix /docs/achievements
+        rewrite * /openapi.json
+        reverse_proxy achievement-service:8006
+    }
+    
+    handle /docs/achievements* {
+        uri strip_prefix /docs/achievements
+        rewrite * /docs
+        reverse_proxy achievement-service:8006 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # Social Service
+    handle /docs/social/openapi.json {
+        uri strip_prefix /docs/social
+        rewrite * /openapi.json
+        reverse_proxy social-service:8007
+    }
+    
+    handle /docs/social* {
+        uri strip_prefix /docs/social
+        rewrite * /docs
+        reverse_proxy social-service:8007 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # Event Service
+    handle /docs/events/openapi.json {
+        uri strip_prefix /docs/events
+        rewrite * /openapi.json
+        reverse_proxy event-service:8008
+    }
+    
+    handle /docs/events* {
+        uri strip_prefix /docs/events
+        rewrite * /docs
+        reverse_proxy event-service:8008 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # Economy Service
+    handle /docs/economy/openapi.json {
+        uri strip_prefix /docs/economy
+        rewrite * /openapi.json
+        reverse_proxy economy-service:8009
+    }
+    
+    handle /docs/economy* {
+        uri strip_prefix /docs/economy
+        rewrite * /docs
+        reverse_proxy economy-service:8009 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # Competition Service
+    handle /docs/competitions/openapi.json {
+        uri strip_prefix /docs/competitions
+        rewrite * /openapi.json
+        reverse_proxy competition-service:8010
+    }
+    
+    handle /docs/competitions* {
+        uri strip_prefix /docs/competitions
+        rewrite * /docs
+        reverse_proxy competition-service:8010 {
+            header_up Host {host}
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # Reward Service
+    handle /docs/rewards/openapi.json {
+        uri strip_prefix /docs/rewards
+        rewrite * /openapi.json
+        reverse_proxy reward-service:8011
+    }
+    
+    handle /docs/rewards* {
+        uri strip_prefix /docs/rewards
+        rewrite * /docs
+        reverse_proxy reward-service:8011 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # Statistics Service
+    handle /docs/statistics/openapi.json {
+        uri strip_prefix /docs/statistics
+        rewrite * /openapi.json
+        reverse_proxy statistics-service:8012
+    }
+    
+    handle /docs/statistics* {
+        uri strip_prefix /docs/statistics
+        rewrite * /docs
+        reverse_proxy statistics-service:8012 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # MAX Bot Service
+    handle /docs/bot/openapi.json {
+        uri strip_prefix /docs/bot
+        rewrite * /openapi.json
+        reverse_proxy max-bot-service:8020
+    }
+    
+    handle /docs/bot* {
+        uri strip_prefix /docs/bot
+        rewrite * /docs
+        reverse_proxy max-bot-service:8020 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+    
+    # Notification Service
+    handle /docs/notifications/openapi.json {
+        uri strip_prefix /docs/notifications
+        rewrite * /openapi.json
+        reverse_proxy notification-service:8013
+    }
+    
+    handle /docs/notifications* {
+        uri strip_prefix /docs/notifications
+        rewrite * /docs
+        reverse_proxy notification-service:8013 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+        }
+    }
+
+    # Обработка openapi.json для всех сервисов (должно быть перед общим /docs*)
+    # Это нужно для того, чтобы Swagger UI мог загрузить спецификацию
+    handle /openapi.json {
+        # Определяем сервис по Referer заголовку
+        @from_users header_regexp Referer ".*/docs/users.*"
+        handle @from_users {
+            reverse_proxy user-service:8001
+        }
+        
+        @from_characters header_regexp Referer ".*/docs/characters.*"
+        handle @from_characters {
+            reverse_proxy character-service:8002
+        }
+        
+        @from_competitions header_regexp Referer ".*/docs/competitions.*"
+        handle @from_competitions {
+            reverse_proxy competition-service:8010
+        }
+        
+        @from_tasks header_regexp Referer ".*/docs/tasks.*"
+        handle @from_tasks {
+            reverse_proxy task-service:8003
+        }
+        
+        @from_habits header_regexp Referer ".*/docs/habits.*"
+        handle @from_habits {
+            reverse_proxy habit-service:8004
+        }
+        
+        @from_inventory header_regexp Referer ".*/docs/inventory.*"
+        handle @from_inventory {
+            reverse_proxy inventory-service:8005
+        }
+        
+        @from_achievements header_regexp Referer ".*/docs/achievements.*"
+        handle @from_achievements {
+            reverse_proxy achievement-service:8006
+        }
+        
+        @from_social header_regexp Referer ".*/docs/social.*"
+        handle @from_social {
+            reverse_proxy social-service:8007
+        }
+        
+        @from_events header_regexp Referer ".*/docs/events.*"
+        handle @from_events {
+            reverse_proxy event-service:8008
+        }
+        
+        @from_economy header_regexp Referer ".*/docs/economy.*"
+        handle @from_economy {
+            reverse_proxy economy-service:8009
+        }
+        
+        @from_rewards header_regexp Referer ".*/docs/rewards.*"
+        handle @from_rewards {
+            reverse_proxy reward-service:8011
+        }
+        
+        @from_statistics header_regexp Referer ".*/docs/statistics.*"
+        handle @from_statistics {
+            reverse_proxy statistics-service:8012
+        }
+        
+        @from_bot header_regexp Referer ".*/docs/bot.*"
+        handle @from_bot {
+            reverse_proxy max-bot-service:8020
+        }
+        
+        @from_notifications header_regexp Referer ".*/docs/notifications.*"
+        handle @from_notifications {
+            reverse_proxy notification-service:8013
+        }
+        
+        # Если не определен сервис, проксируем на user-service по умолчанию
+        reverse_proxy user-service:8001
+    }
+
+    # Единая страница документации для всех сервисов (обрабатываем ПОСЛЕДНИМ, после всех /docs/{service}*)
+    # Обрабатываем только точный путь /docs (без подпутей)
+    @docs_exact path /docs
+    handle @docs_exact {
+        rewrite * /gateway/docs.html
+        file_server {
+            root /usr/share/caddy
+        }
+    }
+
+    # Health check
+    handle /health {
+        respond "OK" 200
+    }
+
+    # Все остальные пути (включая корень /) - проксируем на фронтенд
+    handle {
+        reverse_proxy frontend:80
+    }
+}
+

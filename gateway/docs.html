@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Documentation - All Services</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header h1 {
+            color: #333;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            color: #666;
+            font-size: 16px;
+        }
+        
+        .services-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .service-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+        
+        .service-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .service-card h2 {
+            color: #333;
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+        
+        .service-card p {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        
+        .service-card .port {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .docs-container {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: none;
+        }
+        
+        .docs-container.active {
+            display: block;
+        }
+        
+        .docs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #eee;
+        }
+        
+        .docs-header h2 {
+            color: #333;
+            font-size: 24px;
+        }
+        
+        .close-btn {
+            background: #f44336;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        
+        .close-btn:hover {
+            background: #d32f2f;
+        }
+        
+        .docs-iframe {
+            width: 100%;
+            height: 80vh;
+            border: none;
+            border-radius: 8px;
+        }
+        
+        .back-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            transition: background 0.2s;
+        }
+        
+        .back-btn:hover {
+            background: #5568d3;
+        }
+        
+        .back-btn.hidden {
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .services-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📚 API Documentation</h1>
+            <p>Выберите сервис для просмотра документации Swagger</p>
+        </div>
+        
+        <button class="back-btn hidden" onclick="showServices()">← Назад к списку сервисов</button>
+        
+        <div id="services-grid" class="services-grid">
+            <div class="service-card" onclick="showDocs('users', 'User Service', 8001)">
+                <h2>👤 User Service</h2>
+                <p>Управление пользователями, регистрация, авторизация</p>
+                <span class="port">Port: 8001</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('characters', 'Character Service', 8002)">
+                <h2>🎭 Character Service</h2>
+                <p>Управление персонажами, характеристики, рейтинг</p>
+                <span class="port">Port: 8002</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('tasks', 'Task Service', 8003)">
+                <h2>✅ Task Service</h2>
+                <p>Задачи, цели, выполнение заданий</p>
+                <span class="port">Port: 8003</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('habits', 'Habit Service', 8004)">
+                <h2>🔄 Habit Service</h2>
+                <p>Привычки, трекинг, ежедневные активности</p>
+                <span class="port">Port: 8004</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('inventory', 'Inventory Service', 8005)">
+                <h2>🎒 Inventory Service</h2>
+                <p>Инвентарь, предметы, торговля</p>
+                <span class="port">Port: 8005</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('achievements', 'Achievement Service', 8006)">
+                <h2>🏆 Achievement Service</h2>
+                <p>Достижения, награды, прогресс</p>
+                <span class="port">Port: 8006</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('social', 'Social Service', 8007)">
+                <h2>👥 Social Service</h2>
+                <p>Друзья, группы, социальные функции</p>
+                <span class="port">Port: 8007</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('events', 'Event Service', 8008)">
+                <h2>📅 Event Service</h2>
+                <p>События, уроки, активности</p>
+                <span class="port">Port: 8008</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('economy', 'Economy Service', 8009)">
+                <h2>💰 Economy Service</h2>
+                <p>Магазин, покупки, экономика</p>
+                <span class="port">Port: 8009</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('competitions', 'Competition Service', 8010)">
+                <h2>🏁 Competition Service</h2>
+                <p>Соревнования, вызовы, лидерборды</p>
+                <span class="port">Port: 8010</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('rewards', 'Reward Service', 8011)">
+                <h2>🎁 Reward Service</h2>
+                <p>Награды, монеты, очки интеллекта</p>
+                <span class="port">Port: 8011</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('statistics', 'Statistics Service', 8012)">
+                <h2>📊 Statistics Service</h2>
+                <p>Статистика, аналитика, метрики</p>
+                <span class="port">Port: 8012</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('bot', 'MAX Bot Service', 8020)">
+                <h2>🤖 MAX Bot Service</h2>
+                <p>Telegram бот, команды, интеграции</p>
+                <span class="port">Port: 8020</span>
+            </div>
+            
+            <div class="service-card" onclick="showDocs('notifications', 'Notification Service', 8013)">
+                <h2>🔔 Notification Service</h2>
+                <p>Уведомления, WebSocket, realtime обновления</p>
+                <span class="port">Port: 8013</span>
+            </div>
+        </div>
+        
+        <div id="docs-container" class="docs-container">
+            <div class="docs-header">
+                <h2 id="docs-title"></h2>
+                <button class="close-btn" onclick="showServices()">Закрыть</button>
+            </div>
+            <iframe id="docs-iframe" class="docs-iframe" src=""></iframe>
+        </div>
+    </div>
+    
+    <script>
+        // Используем относительные пути через gateway
+        const serviceUrls = {
+            'users': '/docs/users',
+            'characters': '/docs/characters',
+            'tasks': '/docs/tasks',
+            'habits': '/docs/habits',
+            'inventory': '/docs/inventory',
+            'achievements': '/docs/achievements',
+            'social': '/docs/social',
+            'events': '/docs/events',
+            'economy': '/docs/economy',
+            'competitions': '/docs/competitions',
+            'rewards': '/docs/rewards',
+            'statistics': '/docs/statistics',
+            'bot': '/docs/bot',
+            'notifications': '/docs/notifications'
+        };
+        
+        function showDocs(service, title, port, skipHistory) {
+            const servicesGrid = document.getElementById('services-grid');
+            const docsContainer = document.getElementById('docs-container');
+            const docsIframe = document.getElementById('docs-iframe');
+            const docsTitle = document.getElementById('docs-title');
+            const backBtn = document.querySelector('.back-btn');
+            
+            servicesGrid.style.display = 'none';
+            docsContainer.classList.add('active');
+            backBtn.classList.remove('hidden');
+            
+            docsTitle.textContent = title;
+            // Загружаем Swagger UI напрямую
+            docsIframe.src = serviceUrls[service];
+            
+            // Добавляем запись в историю браузера только если не пропущено
+            if (!skipHistory) {
+                history.pushState({ view: 'docs', service: service, title: title }, '', `#${service}`);
+            }
+        }
+        
+        function showServices(skipHistory) {
+            const servicesGrid = document.getElementById('services-grid');
+            const docsContainer = document.getElementById('docs-container');
+            const docsIframe = document.getElementById('docs-iframe');
+            const backBtn = document.querySelector('.back-btn');
+            
+            servicesGrid.style.display = 'grid';
+            docsContainer.classList.remove('active');
+            backBtn.classList.add('hidden');
+            docsIframe.src = '';
+            
+            // Обновляем URL без добавления в историю (заменяем текущую запись)
+            if (!skipHistory) {
+                history.replaceState({ view: 'services' }, '', window.location.pathname);
+            }
+        }
+        
+        // Обработчик кнопки "Назад" браузера
+        window.addEventListener('popstate', function(event) {
+            if (event.state && event.state.view === 'docs') {
+                // Восстанавливаем просмотр документации без добавления в историю
+                showDocs(event.state.service, event.state.title, null, true);
+            } else {
+                // Возвращаемся к списку сервисов без добавления в историю
+                showServices(true);
+            }
+        });
+        
+        // Обработка загрузки страницы с хэшем
+        window.addEventListener('DOMContentLoaded', function() {
+            const hash = window.location.hash.substring(1); // Убираем #
+            if (hash && serviceUrls[hash]) {
+                // Находим сервис по хэшу
+                const serviceCard = document.querySelector(`[onclick*="'${hash}'"]`);
+                if (serviceCard) {
+                    const title = serviceCard.querySelector('h2')?.textContent || hash;
+                    // При загрузке с хэшем заменяем текущую запись в истории
+                    history.replaceState({ view: 'docs', service: hash, title: title }, '', `#${hash}`);
+                    showDocs(hash, title, null, true);
+                }
+            } else {
+                // Инициализируем состояние для главной страницы
+                history.replaceState({ view: 'services' }, '', window.location.pathname);
+            }
+        });
+    </script>
+</body>
+</html>
+

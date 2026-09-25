@@ -1,0 +1,66 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Сбор логов из Docker контейнеров
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["logging=promtail"]
+    relabel_configs:
+      # Извлекаем имя контейнера
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+        replacement: '${1}'
+      # Извлекаем jobname из labels, если указан
+      - source_labels: ['__meta_docker_container_label_logging_jobname']
+        regex: '(.+)'
+        target_label: 'job'
+        replacement: '${1}'
+      # Если jobname не указан, используем имя контейнера
+      - source_labels: ['__meta_docker_container_label_logging_jobname', 'container']
+        regex: ';(.*)'
+        target_label: 'job'
+        replacement: '${1}'
+      # Добавляем метки для фильтрации
+      - source_labels: ['__meta_docker_container_label_logging']
+        target_label: 'logging'
+      # Удаляем служебные метки
+      - action: labeldrop
+        regex: '__meta_docker_container_label_.*'
+      - action: labeldrop
+        regex: '__meta_docker_container_id'
+      - action: labeldrop
+        regex: '__meta_docker_container_log_stream'
+      - action: labeldrop
+        regex: '__meta_docker_container_log_driver'
+    pipeline_stages:
+      # Парсим JSON логи если они есть
+      - json:
+          expressions:
+            output: log
+            stream: stream
+            attrs: attrs
+      # Извлекаем timestamp если есть
+      - timestamp:
+          source: time
+          format: RFC3339Nano
+      # Добавляем уровень логирования если есть
+      - regex:
+          expression: '.*level=(?P<level>\w+).*'
+      - labels:
+          level:
+      # Удаляем служебные поля
+      - output:
+          source: log
