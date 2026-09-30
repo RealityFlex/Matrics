@@ -1,7 +1,9 @@
-import React from 'react';
-import { CalendarClock, Check, CheckCircle2, ChevronDown, ChevronUp, Flag, Pencil, Trash2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { CalendarClock, Check, CheckCircle2, ChevronDown, ChevronUp, Flag, GitFork, Lock, Pencil, Trash2 } from 'lucide-react';
 import { Badge, Button, ProgressBar } from '../../../components/ui/index.jsx';
 import { RewardChips } from '../../../components/ui/icons.jsx';
+import { buildGoalGraph } from '../goalGraph.js';
+import { GoalRoadmapPreview, GoalRoadmapScreen } from './GoalRoadmap.jsx';
 
 const GOAL_STATUS_INFO = {
   planned: { label: 'Запланирована', tone: 'neutral' },
@@ -48,11 +50,13 @@ export function GoalCard({
   onEditGoalTask,
   onCompleteGoalTask
 }) {
+  const [mapOpen, setMapOpen] = useState(false);
   const totalTasks = goal.tasks?.length ?? 0;
   const completedTasks = goal.tasks?.filter((task) => task.status === 'completed').length ?? 0;
   const allCompleted = totalTasks > 0 && totalTasks === completedTasks;
   const statusInfo = GOAL_STATUS_INFO[goal.status] ?? (goal.status ? UNKNOWN_STATUS : GOAL_STATUS_INFO.planned);
   const isGoalCompleted = goal.status === 'completed';
+  const graph = buildGoalGraph(goal);
 
   const dueDateText = formatDate(goal.due_date);
   const completedAtText = formatDate(goal.completed_at);
@@ -77,6 +81,8 @@ export function GoalCard({
 
       <RewardChips rewards={toRewards(goal)} />
 
+      {totalTasks ? <GoalRoadmapPreview goal={goal} onOpen={() => setMapOpen(true)} /> : null}
+
       {dueDateText || completedAtText ? (
         <div className="fc-meta">
           {dueDateText ? (
@@ -96,6 +102,11 @@ export function GoalCard({
         {!isGoalCompleted && allCompleted ? (
           <Button size="sm" block icon={<Flag size={16} />} onClick={() => onCompleteGoal(goal)}>
             Завершить цель
+          </Button>
+        ) : null}
+        {totalTasks ? (
+          <Button size="sm" variant="secondary" block icon={<GitFork size={16} />} onClick={() => setMapOpen(true)}>
+            Открыть дорожную карту
           </Button>
         ) : null}
         <Button
@@ -124,18 +135,28 @@ export function GoalCard({
         <div className="fc-subtasks">
           {goal.tasks && goal.tasks.length > 0 ? (
             goal.tasks.map((task) => {
+              const node = graph.nodes.find((item) => item.id === task.id);
               const taskInfo = TASK_STATUS_INFO[task.status] ?? (task.status ? UNKNOWN_STATUS : TASK_STATUS_INFO.todo);
               const taskDueDate = formatDate(task.due_date);
               const taskCompletedAt = formatDate(task.completed_at);
               const isTaskCompleted = task.status === 'completed';
+              const locked = Boolean(node?.locked);
+              const dependsTitles = (node?.dependsOn ?? [])
+                .map((index) => graph.byOrder[index]?.title)
+                .filter(Boolean);
 
               return (
                 <div key={task.id} className="fc-subtask">
                   <div className="fc-card__head">
                     <div className="fc-subtask__title">{task.title}</div>
-                    <Badge tone={taskInfo.tone}>{taskInfo.label}</Badge>
+                    <Badge tone={isTaskCompleted ? 'success' : locked ? 'neutral' : taskInfo.tone}>
+                      {isTaskCompleted ? taskInfo.label : locked ? 'Ждёт шаги' : taskInfo.label}
+                    </Badge>
                   </div>
                   {task.description ? <div className="fc-card__desc">{task.description}</div> : null}
+                  {dependsTitles.length ? (
+                    <div className="fc-muted">После: {dependsTitles.join(', ')}</div>
+                  ) : null}
                   <RewardChips rewards={toRewards(task)} />
                   {taskDueDate || taskCompletedAt ? (
                     <div className="fc-meta">
@@ -155,8 +176,13 @@ export function GoalCard({
                     <div className="fc-actions">
                       <div className="fc-actions__row">
                         {!isTaskCompleted ? (
-                          <Button size="sm" icon={<Check size={16} />} onClick={() => onCompleteGoalTask(goal, task)}>
-                            Выполнить
+                          <Button
+                            size="sm"
+                            icon={locked ? <Lock size={16} /> : <Check size={16} />}
+                            disabled={locked}
+                            onClick={() => onCompleteGoalTask(goal, task)}
+                          >
+                            {locked ? 'Сначала предыдущие' : 'Выполнить'}
                           </Button>
                         ) : null}
                         <Button
@@ -178,6 +204,18 @@ export function GoalCard({
           )}
         </div>
       ) : null}
+
+      <GoalRoadmapScreen
+        isOpen={mapOpen}
+        onClose={() => setMapOpen(false)}
+        goal={goal}
+        isGoalCompleted={isGoalCompleted}
+        onCompleteTask={onCompleteGoalTask}
+        onEditTask={(currentGoal, task) => {
+          setMapOpen(false);
+          onEditGoalTask(currentGoal, task);
+        }}
+      />
     </div>
   );
 }

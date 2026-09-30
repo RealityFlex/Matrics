@@ -42,6 +42,7 @@ COLUMNS = [
     ("student_groups", "curator_code", "VARCHAR(16)"),
     ("student_groups", "max_chat_id", "BIGINT"),
     ("student_groups", "team_goal_percent", "INTEGER NOT NULL DEFAULT 80"),
+    ("goal_tasks", "depends_on", "TEXT"),
 ]
 
 # (имя индекса, DDL)

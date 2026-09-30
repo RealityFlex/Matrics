@@ -10,16 +10,18 @@ from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from datetime import datetime, timezone
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 import random
 import re
 
 from services.shared.database import get_db, init_db
+from services.shared.migrations import apply_hackathon_migrations
 from services.shared.models.task import Task, TaskStatus, TaskPriority, Goal, GoalTask, GoalStatus
 from services.shared.models.user import User
 from services.shared.models.task_generation import TaskGeneration
 from services.shared.utils import ServiceClient
 from services.task_service.ai_evaluator import TaskComplexityEvaluator
+from services.task_service.goal_graph import dump_depends_on, parse_depends_on
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +92,16 @@ class GoalTaskResponse(BaseModel):
     reward_intelligence_points: int
     reward_satisfaction: int
     order_index: int
+    depends_on: List[int] = []
     due_date: Optional[datetime]
     completed_at: Optional[datetime]
     created_at: datetime
     updated_at: Optional[datetime]
+
+    @field_validator("depends_on", mode="before")
+    @classmethod
+    def _parse_depends_on(cls, value):
+        return parse_depends_on(value)
 
     class Config:
         from_attributes = True
@@ -333,6 +341,7 @@ app = FastAPI(title="Task Service", version="1.0.0")
 @app.on_event("startup")
 async def startup():
     await init_db()
+    await apply_hackathon_migrations()
 
 @app.get("/")
 async def root():
@@ -485,6 +494,7 @@ async def create_goal(
             reward_intelligence_points=intelligence,
             reward_satisfaction=satisfaction,
             order_index=item.get("order_index", 0),
+            depends_on=dump_depends_on(item.get("depends_on")),
             status=TaskStatus.TODO.value
         )
         db.add(goal_task)

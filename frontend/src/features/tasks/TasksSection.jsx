@@ -551,7 +551,7 @@ export function TasksSection({ isActive }) {
         ) : goalsError ? (
           <StateView state="error" title="Не удалось загрузить цели" message={goalsError} onRetry={loadGoals} compact />
         ) : goals.length === 0 ? (
-          <StateView state="empty" title="Целей пока нет" message="Большая цель разбивается на подзадачи с наградой за каждую." compact />
+          <StateView state="empty" title="Целей пока нет" message="Большая цель разбивается на дорожную карту шагов — с ветками, связями и прогрессом по каждому пункту." compact />
         ) : (
           goals.map((goal) => (
             <GoalCard

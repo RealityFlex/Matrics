@@ -1,0 +1,182 @@
+/* Дорожная карта / дерево шагов глобальной цели */
+
+.goal-map-preview {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    width: 100%;
+    padding: var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-2);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.goal-map-preview__meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+    font-weight: 600;
+}
+.goal-map-preview__meta .tabular { margin-left: auto; color: var(--color-text); }
+
+.goal-map {
+    position: relative;
+    width: 100%;
+    min-height: 80px;
+}
+.goal-map--compact { pointer-events: none; }
+.goal-map__edges { position: absolute; inset: 0; overflow: visible; }
+.goal-map__link {
+    fill: none;
+    stroke: var(--color-border-strong);
+    stroke-width: 2;
+    stroke-linecap: round;
+}
+.goal-map__link.is-done { stroke: var(--color-success); opacity: 0.85; }
+
+.goal-map__node {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    color: var(--color-text);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+}
+.goal-map--compact .goal-map__node { padding: 0 8px; box-shadow: none; }
+button.goal-map__node:focus-visible { box-shadow: var(--focus-ring); }
+.goal-map__node.is-selected { border-color: var(--color-primary-text); }
+.goal-map__node--done {
+    background: var(--color-success-soft);
+    border-color: color-mix(in srgb, var(--color-success) 55%, var(--color-border));
+}
+.goal-map__node--now {
+    background: var(--color-primary-soft);
+    border-color: var(--color-primary-text);
+}
+.goal-map__node--wait {
+    color: var(--color-text-muted);
+    background: var(--color-surface-2);
+    border-style: dashed;
+}
+.goal-map__mark {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    border-radius: var(--radius-full);
+    background: var(--color-surface-2);
+    font-size: 11px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+.goal-map__node--done .goal-map__mark { background: var(--color-success); color: #052e16; }
+.goal-map__node--now .goal-map__mark { background: var(--color-primary); color: var(--color-on-primary); }
+.goal-map__title {
+    min-width: 0;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    font-size: var(--text-xs);
+    font-weight: 650;
+    line-height: 1.25;
+}
+.goal-map--compact .goal-map__title { -webkit-line-clamp: 1; }
+
+.goal-map-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin: 0;
+    padding: 0 var(--space-4);
+    list-style: none;
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+}
+.goal-map-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.goal-map__swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--color-border);
+}
+.goal-map__swatch--done { background: var(--color-success); border-color: transparent; }
+.goal-map__swatch--now { background: var(--color-primary-text); border-color: transparent; }
+.goal-map__swatch--wait { background: transparent; border-style: dashed; }
+
+.goal-map-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 10040;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-bg);
+    color: var(--color-text);
+}
+.goal-map-screen__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: calc(var(--space-3) + var(--safe-top)) var(--space-4) var(--space-2);
+}
+.goal-map-screen__kicker {
+    margin: 0 0 2px;
+    color: var(--color-primary-text);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+.goal-map-screen__title {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: var(--text-lg);
+    line-height: 1.3;
+}
+.goal-map-screen__close {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    background: var(--color-surface);
+    color: var(--color-text);
+}
+.goal-map-screen__progress { padding: 0 var(--space-4) var(--space-2); }
+.goal-map-screen__canvas {
+    flex: 1;
+    overflow: auto;
+    padding: var(--space-2) var(--space-4) var(--space-3);
+}
+
+.goal-map-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-4);
+    padding-bottom: calc(var(--space-4) + var(--safe-bottom));
+    border-top: 1px solid var(--color-border);
+    background: var(--color-surface);
+}
+.goal-map-detail__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.goal-map-detail__title { font-weight: 700; font-size: var(--text-md); }
+.goal-map-detail__desc { margin: 4px 0 0; color: var(--color-text-secondary); font-size: var(--text-sm); line-height: 1.45; }
+.goal-map-detail__deps { margin: 0; color: var(--color-text-muted); font-size: var(--text-xs); }
+.goal-map-detail__actions { display: flex; flex-direction: column; gap: var(--space-2); }
+.goal-map-detail__actions .ui-btn { width: 100%; }

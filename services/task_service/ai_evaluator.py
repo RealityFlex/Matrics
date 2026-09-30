@@ -12,6 +12,8 @@ from typing import Optional, List, Dict, Any
 from enum import Enum
 from dotenv import load_dotenv
 
+from services.task_service.goal_graph import sanitize_breakdown
+
 load_dotenv()
 logger = logging.getLogger(__name__)
 
@@ -393,7 +395,7 @@ class TaskComplexityEvaluator:
         self,
         title: str,
         description: Optional[str] = None,
-        min_tasks: int = 3,
+        min_tasks: int = 4,
         max_tasks: int = 6
     ) -> List[Dict[str, Any]]:
         goal_text = f"Цель: {title.strip()}"
@@ -403,29 +405,32 @@ class TaskComplexityEvaluator:
         if not self.llm_available:
             return self._build_fallback_tasks(title, description, min_tasks, max_tasks)
 
-        prompt = f"""Разложи цель на {min_tasks}–{max_tasks} конкретных шагов в формате JSON:
+        prompt = f"""Разложи цель на {min_tasks}–{max_tasks} шагов дорожной карты (ориентированный граф) в JSON:
 {{
   "tasks": [
     {{
       "title": "Чёткое действие (≤120 символов)",
-      "description": "Как именно сделать, с измеримым результатом"
-    }},
-    ...
+      "description": "Как именно сделать, с измеримым результатом",
+      "depends_on": []
+    }}
   ]
 }}
-Требования:
-- Каждый шаг — реальное действие, а не планирование.
-- Соответствует цели, использует детали из описания.
-- Нет общих фраз ("подумать", "мотивироваться").
+Правила:
+- Каждый шаг — реальное действие, не «подумать» и не «мотивироваться».
+- depends_on — индексы предыдущих шагов (с 0 по порядку массива), без которых шаг нельзя начать.
+- Первый шаг: depends_on = [].
+- Можно ветвить: два шага с одним и тем же depends_on идут параллельно.
+- Финальный шаг зависит от всех веток, которые нужно свести.
+- Нет циклов и ссылок вперёд.
 - Строгий JSON без лишнего текста.
 
 {goal_text}"""
 
         try:
             if self.provider == LLMProvider.OPENROUTER.value:
-                content = await self._call_openrouter_json(prompt, max_tokens=500, temperature=0.3)
+                content = await self._call_openrouter_json(prompt, max_tokens=900, temperature=0.3)
             else:
-                content = await self._call_ollama_json(prompt, max_tokens=500, temperature=0.3)
+                content = await self._call_ollama_json(prompt, max_tokens=900, temperature=0.3)
 
             payload = json.loads(content)
             tasks_raw = payload.get("tasks", [])
@@ -443,13 +448,14 @@ class TaskComplexityEvaluator:
                 tasks.append({
                     "title": title[:120],
                     "description": desc[:500],
-                    "order_index": i
+                    "order_index": i,
+                    "depends_on": t.get("depends_on") or [],
                 })
                 if len(tasks) >= max_tasks:
                     break
 
             if len(tasks) >= min_tasks:
-                return tasks
+                return sanitize_breakdown(tasks)
 
         except Exception as e:
             logger.warning(f"Ошибка генерации декомпозиции: {e}")
@@ -464,21 +470,33 @@ class TaskComplexityEvaluator:
         min_tasks: int,
         max_tasks: int
     ) -> List[Dict[str, Any]]:
-        base = [
-            {
-                "title": "Подготовиться к выполнению цели",
-                "description": "Собрать материалы, выделить время, поставить напоминание.",
-                "order_index": 0
-            },
-            {
-                "title": "Выполнить основную часть цели",
-                "description": "Реализовать ключевое действие, описанное в цели.",
-                "order_index": 1
-            },
-            {
-                "title": "Проверить результат и зафиксировать прогресс",
-                "description": "Оцените, насколько цель достигнута, запишите выводы.",
-                "order_index": 2
-            }
-        ]
-        return base[:max_tasks]
+        hint = (description or title).strip()[:160]
+        n = min(max(min_tasks, 3), max_tasks)
+        if n <= 3:
+            tasks = [
+                {"title": "Собрать вводные по цели", "description": f"Материалы, срок и критерий успеха для: {hint}.", "depends_on": []},
+                {"title": "Выполнить основную работу", "description": "Сделать ключевое действие цели.", "depends_on": [0]},
+                {"title": "Проверить результат", "description": "Сверить с критерием успеха и зафиксировать прогресс.", "depends_on": [1]},
+            ]
+        elif n == 4:
+            tasks = [
+                {"title": "Собрать вводные по цели", "description": f"Материалы и критерий успеха для: {hint}.", "depends_on": []},
+                {"title": "Сделать первую ветку работы", "description": "Закрыть первую самостоятельную часть цели.", "depends_on": [0]},
+                {"title": "Сделать вторую ветку работы", "description": "Закрыть вторую часть параллельно с первой.", "depends_on": [0]},
+                {"title": "Свести и проверить результат", "description": "Объединить ветки и сверить с критерием успеха.", "depends_on": [1, 2]},
+            ]
+        else:
+            tasks = [
+                {"title": "Собрать вводные и критерии", "description": f"Что считать успехом для: {hint}.", "depends_on": []},
+                {"title": "Наметить дорожную карту", "description": "Выбрать порядок шагов и параллельные ветки.", "depends_on": [0]},
+                {"title": "Выполнить первую ветку", "description": "Закрыть первую самостоятельную часть цели.", "depends_on": [1]},
+                {"title": "Выполнить вторую ветку", "description": "Закрыть вторую часть, не дожидаясь первой.", "depends_on": [1]},
+                {"title": "Свести результаты", "description": "Собрать обе ветки в один проверяемый итог.", "depends_on": [2, 3]},
+            ]
+            if n >= 6:
+                tasks.append({
+                    "title": "Проверить и закрепить итог",
+                    "description": "Сверить с критериями, записать вывод, закрыть цель.",
+                    "depends_on": [4],
+                })
+        return sanitize_breakdown(tasks[:n])

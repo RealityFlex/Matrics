@@ -118,6 +118,8 @@ class GoalTask(Base):
     reward_intelligence_points = Column(Integer, default=0, nullable=False)
     reward_satisfaction = Column(Integer, default=0, nullable=False)
     order_index = Column(Integer, default=0, nullable=False)
+    # JSON-список order_index шагов, без которых этот нельзя начинать
+    depends_on = Column(Text, nullable=True)
     due_date = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
