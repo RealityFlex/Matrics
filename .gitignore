@@ -69,3 +69,5 @@ landing/
 # Node
 node_modules/
 frontend/dist/
+
+3d/
