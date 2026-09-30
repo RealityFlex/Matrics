@@ -13,7 +13,7 @@ import '../../styles/game.css';
  * Карточка мини-игры на главном экране: рекорд, место в группе, топ недели и запуск забега.
  */
 export function GameCard({ isActive }) {
-  const { user, pendingGame } = useAppState();
+  const { user, pendingGame, character } = useAppState();
   const dispatch = useAppDispatch();
   const refreshUserAndCharacter = useRefreshUserAndCharacter();
   const [overview, setOverview] = useState(null);
@@ -155,6 +155,7 @@ export function GameCard({ isActive }) {
         userId={user?.id}
         overview={overview}
         onFinished={handleFinished}
+        characterKey={character?.active_character_set?.asset_key}
       />
     </Card>
   );

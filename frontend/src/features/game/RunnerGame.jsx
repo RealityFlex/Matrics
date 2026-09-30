@@ -90,7 +90,7 @@ function Leaderboard({ userId }) {
  * Полноэкранная мини-игра «Забег до пары».
  * Фазы: intro → countdown → running ⇄ paused → submitting → result (+ leaderboard).
  */
-export function RunnerGame({ isOpen, onClose, userId, overview, onFinished }) {
+export function RunnerGame({ isOpen, onClose, userId, overview, onFinished, characterKey }) {
   const stageRef = useRef(null);
   const engineRef = useRef(null);
   const runRef = useRef(null);
@@ -140,7 +140,7 @@ export function RunnerGame({ isOpen, onClose, userId, overview, onFinished }) {
         submit(result);
       },
       onAutoPause: () => setPhase('paused')
-    });
+    }, { characterKey });
     engineRef.current = engine;
     setPhase('intro');
     setServerResult(null);

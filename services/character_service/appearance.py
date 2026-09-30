@@ -38,7 +38,7 @@ router = APIRouter()
 DEFAULT_CATALOG = [
     ("student_basic", AppearanceKind.CHARACTER, "Первокурсник", "Базовый образ", "character:student_basic",
      UnlockType.NONE, 0, None, 10),
-    ("scholar", AppearanceKind.CHARACTER, "Эрудит", "Очки и свитер — за 5 посещённых занятий",
+    ("scholar", AppearanceKind.CHARACTER, "Эрудит", "Отдельный образ — за 5 посещённых занятий",
      "character:scholar", UnlockType.LESSONS_ATTENDED, 5, None, 20),
     ("night_owl", AppearanceKind.CHARACTER, "Полуночник", "Худи и наушники", "character:night_owl",
      UnlockType.COINS, 0, 150, 30),

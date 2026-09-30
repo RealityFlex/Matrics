@@ -2,7 +2,6 @@ import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef,
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import modelUrl from '../../assets/models/test_model_2.glb?url';
 import roomUrl from '../../assets/models/room.glb?url';
 import {
   DEFAULT_CHARACTER_KEY,
@@ -12,8 +11,16 @@ import {
   environmentPreset,
   idleAnimationFor
 } from './appearance/presets.js';
-
-const REACTION_ANIMATION = 'epic_dance';
+import {
+  AVATAR_CLIP,
+  avatarUrlFor,
+  collectAvatarActions,
+  hideStaticAvatarMeshes,
+  layoutAvatar,
+  measureAvatarFitScale,
+  prepareAvatarMaterials,
+  resolveAvatarAction
+} from './avatarModel.js';
 
 /** Аксессуар в «единицах головы» (1 = высота головы), крепится к кости HeadTop_End */
 function buildAccessory(kind, color, accent) {
@@ -99,27 +106,28 @@ export const CharacterViewer = forwardRef(function CharacterViewer(
   const reactionRef = useRef({ until: 0, pulse: 0 });
   const isActiveRef = useRef(isActive);
   const satisfactionRef = useRef(satisfaction);
+  const growthStageRef = useRef(growthStage);
 
   const [status, setStatus] = useState('loading');
   const [attempt, setAttempt] = useState(0);
 
   isActiveRef.current = isActive;
   satisfactionRef.current = satisfaction;
+  growthStageRef.current = growthStage;
 
   const playAnimation = useCallback((name, { once = false } = {}) => {
     const { actions } = sceneRef.current;
-    if (!actions?.size) return;
-    const next = actions.get(name) ?? actions.get('neutral_idle') ?? actions.values().next().value;
+    const next = resolveAvatarAction(actions, name);
     const current = sceneRef.current.activeAction;
     if (!next || (current === next && !once)) return;
     next.reset();
+    next.enabled = true;
     next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
-    next.clampWhenFinished = false;
+    next.clampWhenFinished = Boolean(once);
     if (current && current !== next) {
       next.setEffectiveWeight(1).fadeIn(0.3).play();
       current.fadeOut(0.3);
     } else {
-      // Первая анимация — сразу с полным весом, без «вспышки» T-позы
       next.setEffectiveWeight(1).play();
     }
     sceneRef.current.activeAction = next;
@@ -131,7 +139,7 @@ export const CharacterViewer = forwardRef(function CharacterViewer(
       /** Реакция персонажа на награду: танец + «пульс» масштаба */
       playReaction() {
         reactionRef.current = { until: performance.now() + 4200, pulse: performance.now() };
-        playAnimation(REACTION_ANIMATION, { once: true });
+        playAnimation(AVATAR_CLIP.dance);
       }
     }),
     [playAnimation]
@@ -153,16 +161,16 @@ export const CharacterViewer = forwardRef(function CharacterViewer(
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 1000);
-    camera.position.set(0, 2.6, 9.1);
+    camera.position.set(0, 2.25, 7.4);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enablePan = false;
     controls.enableDamping = true;
     controls.minPolarAngle = Math.PI / 4;
     controls.maxPolarAngle = Math.PI / 2;
-    controls.minDistance = 4;
-    controls.maxDistance = 9;
-    controls.target.set(0, 1.2, 0);
+    controls.minDistance = 3.4;
+    controls.maxDistance = 8.5;
+    controls.target.set(0, 1.05, 0);
     const initialAzimuth = controls.getAzimuthalAngle();
     controls.minAzimuthAngle = initialAzimuth - THREE.MathUtils.degToRad(25);
     controls.maxAzimuthAngle = initialAzimuth + THREE.MathUtils.degToRad(90);
@@ -226,7 +234,52 @@ export const CharacterViewer = forwardRef(function CharacterViewer(
       });
     };
 
-    Promise.all([load(roomUrl), load(modelUrl)])
+    const installCharacter = (characterGltf, url) => {
+      const state = sceneRef.current;
+      if (state.accessory) {
+        state.accessory.parent?.remove(state.accessory);
+        disposeObject(state.accessory);
+        state.accessory = null;
+      }
+      if (state.model) {
+        state.scene.remove(state.model);
+        disposeObject(state.model);
+      }
+      const model = characterGltf.scene;
+      hideStaticAvatarMeshes(model);
+      prepareAvatarMaterials(model);
+      const fitScale = measureAvatarFitScale(model);
+      const growthScale = GROWTH_SCALE[growthStageRef.current] ?? GROWTH_SCALE.teen;
+      layoutAvatar(model, {
+        fitScale,
+        growthScale,
+        offset: { x: -0.5, z: 0.35 }
+      });
+      state.scene.add(model);
+      const mixer = new THREE.AnimationMixer(model);
+      const actions = collectAvatarActions(mixer, characterGltf.animations);
+      mixer.addEventListener('finished', () => {
+        if (performance.now() < reactionRef.current.until) return;
+        playAnimation(idleAnimationFor(satisfactionRef.current));
+      });
+      let headTop = null;
+      model.traverse((child) => {
+        if (!headTop && child.isBone && /HeadTop_End$/i.test(child.name)) headTop = child;
+      });
+      Object.assign(state, {
+        model,
+        mixer,
+        actions,
+        headTop,
+        fitScale,
+        avatarUrl: url,
+        activeAction: null,
+        baseScale: fitScale * growthScale
+      });
+    };
+
+    const initialUrl = avatarUrlFor(characterKey);
+    Promise.all([load(roomUrl), load(initialUrl)])
       .then(([roomGltf, characterGltf]) => {
         if (disposed) return;
         const room = roomGltf.scene;
@@ -234,7 +287,6 @@ export const CharacterViewer = forwardRef(function CharacterViewer(
         recenter(room);
         scene.add(room);
 
-        // Исходные цвета материалов комнаты — для перекраски окружений
         const roomMaterials = new Map();
         room.traverse((child) => {
           if (!child.isMesh) return;
@@ -246,39 +298,20 @@ export const CharacterViewer = forwardRef(function CharacterViewer(
           });
         });
 
-        const model = characterGltf.scene;
-        prepareMeshes(model);
-        recenter(model);
-        model.position.z += 0.35;
-        model.position.x -= 0.5;
-        model.scale.setScalar(GROWTH_SCALE.teen);
-        scene.add(model);
-
-        const mixer = new THREE.AnimationMixer(model);
-        const actions = new Map();
-        characterGltf.animations.forEach((clip) => {
-          actions.set(clip.name?.trim(), mixer.clipAction(clip));
-        });
-        mixer.addEventListener('finished', () => {
-          // После одноразовой реакции возвращаемся к анимации по настроению
-          playAnimation(idleAnimationFor(satisfactionRef.current));
-        });
-
         const ring = new THREE.Mesh(
           new THREE.RingGeometry(0.55, 0.75, 48),
           new THREE.MeshBasicMaterial({ color: 0x5eead4, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
         );
         ring.rotation.x = -Math.PI / 2;
-        ring.position.set(model.position.x, 0.02, model.position.z);
         ring.visible = false;
         scene.add(ring);
 
-        let headTop = null;
-        model.traverse((child) => {
-          if (!headTop && child.isBone && /HeadTop_End$/i.test(child.name)) headTop = child;
-        });
-
-        Object.assign(sceneRef.current, { model, room, roomMaterials, mixer, actions, ring, headTop, baseY: model.position.y });
+        Object.assign(sceneRef.current, { room, roomMaterials, ring, installCharacter });
+        installCharacter(characterGltf, initialUrl);
+        if (sceneRef.current.model) {
+          ring.position.set(sceneRef.current.model.position.x, 0.02, sceneRef.current.model.position.z);
+        }
+        playAnimation(idleAnimationFor(satisfactionRef.current));
         setStatus('ready');
 
         const clock = new THREE.Clock();
@@ -289,19 +322,25 @@ export const CharacterViewer = forwardRef(function CharacterViewer(
             return;
           }
           const delta = clock.getDelta();
-          mixer.update(delta);
+          const state = sceneRef.current;
+          state.mixer?.update(delta);
           controls.update();
 
           const now = performance.now();
           const { pulse, until } = reactionRef.current;
-          const baseScale = sceneRef.current.baseScale ?? GROWTH_SCALE.teen;
-          if (now < until) {
+          const baseScale = state.baseScale;
+          const model = state.model;
+          if (until > 0 && now >= until) {
+            reactionRef.current.until = 0;
+            playAnimation(idleAnimationFor(satisfactionRef.current));
+          }
+          if (model && baseScale && now < until) {
             const t = (now - pulse) / 1000;
             model.scale.setScalar(baseScale * (1 + 0.06 * Math.max(0, Math.sin(t * 6)) * Math.exp(-t * 0.8)));
-          } else if (model.scale.x !== baseScale) {
+          } else if (model && baseScale && Math.abs(model.scale.x - baseScale) > 1e-4) {
             model.scale.setScalar(baseScale);
           }
-          sceneRef.current.accessory?.traverse((child) => {
+          state.accessory?.traverse((child) => {
             if (child.userData.spin) child.rotation.y += delta * 1.5;
           });
           renderer.render(scene, camera);
@@ -325,6 +364,30 @@ export const CharacterViewer = forwardRef(function CharacterViewer(
     };
   }, [attempt, playAnimation]);
 
+  // ---------- Смена GLB при выборе сета (например «Эрудит») ----------
+  useEffect(() => {
+    const state = sceneRef.current;
+    if (status !== 'ready' || !state.installCharacter) return undefined;
+    const url = avatarUrlFor(characterKey);
+    if (state.avatarUrl === url) return undefined;
+    let cancelled = false;
+    const loader = new GLTFLoader();
+    loader.load(
+      url,
+      (gltf) => {
+        if (cancelled || !sceneRef.current.installCharacter) return;
+        sceneRef.current.installCharacter(gltf, url);
+        playAnimation(idleAnimationFor(satisfactionRef.current));
+        sceneRef.current.applyAll?.();
+      },
+      undefined,
+      (error) => console.error('[CharacterViewer] Не удалось сменить модель:', error)
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [characterKey, status, playAnimation]);
+
   // ---------- Настроение → анимация в покое ----------
   useEffect(() => {
     if (status !== 'ready') return;
@@ -338,8 +401,16 @@ export const CharacterViewer = forwardRef(function CharacterViewer(
       const state = sceneRef.current;
       if (!state.model) return;
 
-      state.baseScale = GROWTH_SCALE[growthStage] ?? GROWTH_SCALE.teen;
-      state.model.scale.setScalar(state.baseScale);
+      const growthScale = GROWTH_SCALE[growthStage] ?? GROWTH_SCALE.teen;
+      const fitScale = state.fitScale ?? 1;
+      state.baseScale = fitScale * growthScale;
+      if (state.model && fitScale) {
+        layoutAvatar(state.model, {
+          fitScale,
+          growthScale,
+          offset: { x: -0.5, z: 0.35 }
+        });
+      }
 
       const env = environmentPreset(environmentKey, environmentTheme);
       const background = new THREE.Color(env.background);
@@ -381,6 +452,7 @@ export const CharacterViewer = forwardRef(function CharacterViewer(
       if (state.ring) {
         state.ring.visible = Boolean(preset.ring);
         if (preset.ring) state.ring.material.color.set(preset.ring);
+        state.ring.position.set(state.model.position.x, 0.02, state.model.position.z);
       }
     };
     sceneRef.current.applyAll = apply;

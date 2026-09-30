@@ -5,15 +5,22 @@
  * препятствия и монеты рождаются впереди (SPAWN_AHEAD) и уезжают за камеру.
  * Трасса строится детерминированно из seed, который выдаёт сервер.
  *
- * Бегун — 3D-персонаж пользователя (та же модель, что на главном экране). Анимации
- * бега в модели нет, поэтому поверх idle-клипа процедурно раскачиваются кости ног и рук.
+ * Бегун — тот же 3D-аватар, что на главном экране. Клипы из модели:
+ * run, jump_cool, roll_down, neutral_idle.
  *
  * Правила, общие с сервером (services/competition_service/minigame.py):
  * очки = дистанция + монеты × SCORE_PER_COIN, скорость ≤ MAX_SPEED, монеты не плотнее 2 м.
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import modelUrl from '../../assets/models/test_model_2.glb?url';
+import {
+  AVATAR_CLIP,
+  avatarUrlFor,
+  collectAvatarActions,
+  layoutAvatar,
+  measureAvatarFitScale,
+  prepareAvatarMaterials
+} from '../character/avatarModel.js';
 
 export const RUNNER = {
   LANES: [-2.2, 0, 2.2],
@@ -29,7 +36,9 @@ export const RUNNER = {
   SLIDE_TIME: 0.75,
   LANE_SWITCH_SPEED: 14,
   PLAYER_HEIGHT: 1.6,
-  SLIDE_HEIGHT: 0.7
+  SLIDE_HEIGHT: 0.7,
+  JUMP_ANIM_SCALE: 0.58,
+  ROLL_ANIM_SCALE: 1.95
 };
 
 const COLORS = {
@@ -56,15 +65,7 @@ const OBSTACLES = {
   block: { bottom: 0, top: 2.6, depth: 3.6 }       // сменить полосу
 };
 
-// Процедурная поза бега: оси и амплитуды для костей mixamo (подобраны под модель)
-const RUN_POSE = {
-  upLeg: 0.85,
-  knee: 1.1,
-  arm: 0.6,
-  foreArm: 0.9,
-  lean: 0.18,
-  bob: 0.07
-};
+const standard = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.05, ...extra });
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -76,16 +77,11 @@ function mulberry32(seed) {
   };
 }
 
-const X = new THREE.Vector3(1, 0, 0);
-const Z = new THREE.Vector3(0, 0, 1);
-const TMP_Q = new THREE.Quaternion();
-
-const standard = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.05, ...extra });
-
 export class RunnerEngine {
-  constructor(container, callbacks = {}) {
+  constructor(container, callbacks = {}, { characterKey } = {}) {
     this.container = container;
     this.callbacks = callbacks;
+    this.modelUrl = avatarUrlFor(characterKey);
     this.state = 'idle'; // idle | countdown | running | paused | crashed
     this.disposables = [];
     this.pools = { barrier: [], banner: [], block: [], coin: [], mark: [], prop: [] };
@@ -121,6 +117,8 @@ export class RunnerEngine {
     this.slideLeft = 0;
     this.crashTime = 0;
     this.lastHud = 0;
+    this.animName = null;
+    this.#playAction(AVATAR_CLIP.neutralIdle, { loop: true, fade: 0.2 });
     this.#spawnAhead();
     this.#emitHud(true);
   }
@@ -357,8 +355,9 @@ export class RunnerEngine {
   #setupPlayer() {
     this.player = new THREE.Group();
     this.scene.add(this.player);
+    this.actions = new Map();
+    this.animName = null;
 
-    // Мягкая тень-пятно под персонажем
     const shadow = new THREE.Mesh(
       new THREE.CircleGeometry(0.5, 24),
       new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false })
@@ -368,65 +367,59 @@ export class RunnerEngine {
     this.scene.add(shadow);
     this.shadow = shadow;
 
-    // Заглушка, пока грузится модель (и если модель не загрузилась)
     const placeholder = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 0.9, 6, 12), standard(0x5eead4));
     placeholder.position.y = 0.8;
     this.player.add(placeholder);
     this.placeholder = placeholder;
-    this.phase = 0;
 
     new GLTFLoader().load(
-      modelUrl,
+      this.modelUrl,
       (gltf) => {
         if (!this.renderer) return;
         const model = gltf.scene;
-        model.traverse((child) => {
-          if (child.isMesh) {
-            child.frustumCulled = false;
-            const materials = Array.isArray(child.material) ? child.material : [child.material];
-            materials.forEach((material) => {
-              if (!material) return;
-              material.transparent = false;
-              material.opacity = 1;
-            });
-          }
-        });
-        model.updateMatrixWorld(true);
-        const box = new THREE.Box3().setFromObject(model);
-        const size = box.getSize(new THREE.Vector3());
-        const scale = RUNNER.PLAYER_HEIGHT / (size.y || 1);
-        model.scale.setScalar(scale);
-        const center = box.getCenter(new THREE.Vector3());
-        model.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
+        prepareAvatarMaterials(model, { shadows: false });
+        const fitScale = measureAvatarFitScale(model, RUNNER.PLAYER_HEIGHT);
+        layoutAvatar(model, { fitScale, growthScale: 1 });
         const holder = new THREE.Group();
-        holder.rotation.y = Math.PI; // лицом по направлению бега
+        holder.rotation.y = Math.PI;
         holder.add(model);
         this.player.remove(this.placeholder);
         this.player.add(holder);
         this.model = holder;
 
         this.mixer = new THREE.AnimationMixer(model);
-        const idle = gltf.animations.find((clip) => clip.name === 'neutral_idle') ?? gltf.animations[0];
-        if (idle) this.mixer.clipAction(idle).play();
-
-        const bones = {};
-        const want = {
-          hips: /Hips$/, spine: /Spine$/, leftUpLeg: /LeftUpLeg$/, rightUpLeg: /RightUpLeg$/,
-          leftLeg: /LeftLeg$/, rightLeg: /RightLeg$/, leftArm: /LeftArm$/, rightArm: /RightArm$/,
-          leftForeArm: /LeftForeArm$/, rightForeArm: /RightForeArm$/
-        };
-        model.traverse((child) => {
-          if (!child.isBone) return;
-          Object.entries(want).forEach(([key, pattern]) => {
-            if (!bones[key] && pattern.test(child.name)) bones[key] = child;
-          });
-        });
-        this.bones = bones;
+        this.actions = collectAvatarActions(this.mixer, gltf.animations, { inPlace: true });
+        this.animName = null;
+        this.#playAction(AVATAR_CLIP.neutralIdle, { loop: true, fade: 0 });
         this.callbacks.onReady?.();
       },
       undefined,
       () => this.callbacks.onReady?.()
     );
+  }
+
+  #playAction(name, { loop = true, fade = 0.12 } = {}) {
+    if (!this.actions?.size || this.animName === name) return;
+    const next = this.actions.get(name) ?? this.actions.get(AVATAR_CLIP.neutralIdle);
+    if (!next) return;
+    next.reset();
+    next.enabled = true;
+    next.timeScale = name === AVATAR_CLIP.jump
+      ? RUNNER.JUMP_ANIM_SCALE
+      : name === AVATAR_CLIP.roll
+        ? RUNNER.ROLL_ANIM_SCALE
+        : 1;
+    next.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
+    next.clampWhenFinished = !loop;
+    const current = this.activeAction;
+    if (current && current !== next) {
+      next.setEffectiveWeight(1).fadeIn(fade).play();
+      current.fadeOut(fade);
+    } else {
+      next.setEffectiveWeight(1).play();
+    }
+    this.activeAction = next;
+    this.animName = name;
   }
 
   #bindInput() {
@@ -656,42 +649,32 @@ export class RunnerEngine {
     this.shadow.position.set(p.x, 0.02, 0);
     this.shadow.scale.setScalar(Math.max(0.4, 1 - p.y * 0.3));
 
-    // Камера мягко следует за полосой
     this.camera.position.x += (p.x * 0.55 - this.camera.position.x) * Math.min(1, dt * 6);
     this.camera.lookAt(this.camera.position.x * 0.4, 1.1, -8);
 
+    if (this.state === 'paused') return;
     this.mixer?.update(dt);
-    const running = this.state === 'running';
-    const crashed = this.state === 'crashed';
 
-    if (crashed) {
+    const sliding = this.slideLeft > 0 && p.y < 0.3;
+    const airborne = p.y > 0.05 || this.velocityY > 1;
+    if (this.state === 'crashed') {
       this.crashTime += dt;
-      this.player.rotation.x += (1.35 - this.player.rotation.x) * Math.min(1, dt * 8);
+      this.#playAction(AVATAR_CLIP.roll, { loop: false, fade: 0.08 });
       return;
     }
-    const sliding = this.slideLeft > 0 && p.y < 0.3;
-    this.player.rotation.x += ((sliding ? 1.15 : 0) - this.player.rotation.x) * Math.min(1, dt * 18);
-    if (this.model) this.model.position.y = sliding ? 0.25 : 0;
-
-    const bones = this.bones;
-    if (!bones || !running) return;
-    this.phase += dt * (7.5 + this.speed * 0.2);
-    const s = Math.sin(this.phase);
-    const airborne = p.y > 0.05;
-    const swing = airborne ? 0 : s;
-    const rot = (bone, axis, angle) => {
-      if (!bone) return;
-      bone.quaternion.multiply(TMP_Q.setFromAxisAngle(axis, angle));
-    };
-    rot(bones.leftUpLeg, X, -swing * RUN_POSE.upLeg - (airborne ? 0.9 : 0));
-    rot(bones.rightUpLeg, X, swing * RUN_POSE.upLeg - (airborne ? 0.5 : 0));
-    rot(bones.leftLeg, X, (airborne ? 1.2 : Math.max(0, s) * RUN_POSE.knee + 0.2));
-    rot(bones.rightLeg, X, (airborne ? 0.8 : Math.max(0, -s) * RUN_POSE.knee + 0.2));
-    rot(bones.leftArm, Z, swing * RUN_POSE.arm);
-    rot(bones.rightArm, Z, swing * RUN_POSE.arm);
-    rot(bones.leftForeArm, X, RUN_POSE.foreArm * 0.3);
-    rot(bones.rightForeArm, X, RUN_POSE.foreArm * 0.3);
-    rot(bones.spine, X, RUN_POSE.lean);
-    if (this.model && !sliding) this.model.position.y = airborne ? 0 : Math.abs(s) * RUN_POSE.bob;
+    if (this.state === 'running') {
+      if (airborne) {
+        this.#playAction(AVATAR_CLIP.jump, { loop: false, fade: 0.08 });
+      } else if (sliding) {
+        this.#playAction(AVATAR_CLIP.roll, { loop: false, fade: 0.08 });
+      } else {
+        this.#playAction(AVATAR_CLIP.run, { loop: true, fade: 0.12 });
+        if (this.activeAction) {
+          this.activeAction.timeScale = 0.85 + (this.speed / RUNNER.MAX_SPEED) * 0.55;
+        }
+      }
+      return;
+    }
+    this.#playAction(AVATAR_CLIP.neutralIdle, { loop: true, fade: 0.2 });
   }
 }

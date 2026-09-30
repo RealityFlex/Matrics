@@ -4,14 +4,13 @@
  * Ключ = asset_key сета из character-service (например 'character:scholar').
  * Сейчас сеты процедурные: аксессуар на голове + цветное кольцо под персонажем,
  * окружение — свет, туман, фон и перекраска материалов комнаты.
- * Чтобы подключить готовую модель, добавьте в пресет поле `glb` (URL модели) —
- * CharacterViewer загрузит её вместо базовой (персонаж должен содержать те же
- * анимации: epic_dance, happy_idle, neutral_idle, sad_idle).
+ * Базовая модель — `avatar_f.glb`. Сет «Эрудит» подменяет её на
+ * `avatar_scholar_f.glb` (тот же набор клипов).
  */
 
 export const CHARACTER_PRESETS = {
   'character:student_basic': { ring: null, accessory: null },
-  'character:scholar': { ring: '#5eead4', accessory: 'mortarboard', accessoryColor: '#1f2937', accentColor: '#facc15' },
+  'character:scholar': { ring: '#5eead4', accessory: null },
   'character:night_owl': { ring: '#818cf8', accessory: 'beanie', accessoryColor: '#312e81', accentColor: '#a5b4fc' },
   'character:champion': { ring: '#ffa94d', accessory: 'crown', accessoryColor: '#f59e0b', accentColor: '#fde68a' },
   'character:mentor': { ring: '#4ade80', accessory: 'star', accessoryColor: '#fbbf24', accentColor: '#fef3c7' }
@@ -98,7 +97,7 @@ export const GROWTH_SCALE = { baby: 0.66, teen: 0.75, adult: 0.84 };
 /** Анимация «в покое» по удовлетворению — те же пороги, что в shared/character_mood.py */
 export function idleAnimationFor(satisfaction) {
   if (typeof satisfaction !== 'number') return 'neutral_idle';
-  if (satisfaction >= 85) return 'epic_dance';
+  if (satisfaction >= 85) return 'cool_dance';
   if (satisfaction >= 65) return 'happy_idle';
   if (satisfaction >= 40) return 'neutral_idle';
   return 'sad_idle';
