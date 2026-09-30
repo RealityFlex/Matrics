@@ -364,7 +364,7 @@ export const CharacterViewer = forwardRef(function CharacterViewer(
     };
   }, [attempt, playAnimation]);
 
-  // ---------- Смена GLB при выборе сета (например «Эрудит») ----------
+  // ---------- Смена GLB при выборе сета («Эрудит», «Полуночник» и т.п.) ----------
   useEffect(() => {
     const state = sceneRef.current;
     if (status !== 'ready' || !state.installCharacter) return undefined;

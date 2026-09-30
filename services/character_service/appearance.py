@@ -40,8 +40,8 @@ DEFAULT_CATALOG = [
      UnlockType.NONE, 0, None, 10),
     ("scholar", AppearanceKind.CHARACTER, "Эрудит", "Отдельный образ — за 5 посещённых занятий",
      "character:scholar", UnlockType.LESSONS_ATTENDED, 5, None, 20),
-    ("night_owl", AppearanceKind.CHARACTER, "Полуночник", "Худи и наушники", "character:night_owl",
-     UnlockType.COINS, 0, 150, 30),
+    ("night_owl", AppearanceKind.CHARACTER, "Полуночник", "Отдельный образ — за 150 монет",
+     "character:night_owl", UnlockType.COINS, 0, 150, 30),
     ("champion", AppearanceKind.CHARACTER, "Чемпион дисциплины", "Серия из 7 посещений подряд",
      "character:champion", UnlockType.ATTENDANCE_STREAK, 7, None, 40),
     ("mentor", AppearanceKind.CHARACTER, "Наставник", "Пиджак и шарф — 5 уровень интеллекта",
@@ -89,15 +89,24 @@ class AppearanceSetCreate(BaseModel):
 # ---------- Сиды и метрики ----------
 
 async def seed_appearance_catalog(session: AsyncSession) -> None:
-    existing = set((await session.execute(select(AppearanceSet.code))).scalars().all())
+    existing = {row.code: row for row in (await session.execute(select(AppearanceSet))).scalars().all()}
     for code, kind, name, description, asset_key, unlock_type, unlock_value, price, sort in DEFAULT_CATALOG:
-        if code in existing:
+        item = existing.get(code)
+        if item is None:
+            session.add(AppearanceSet(
+                code=code, kind=kind, name=name, description=description, asset_key=asset_key,
+                unlock_type=unlock_type, unlock_value=unlock_value, price_coins=price, sort_order=sort,
+                theme_id="default",
+            ))
             continue
-        session.add(AppearanceSet(
-            code=code, kind=kind, name=name, description=description, asset_key=asset_key,
-            unlock_type=unlock_type, unlock_value=unlock_value, price_coins=price, sort_order=sort,
-            theme_id="default",
-        ))
+        item.kind = kind
+        item.name = name
+        item.description = description
+        item.asset_key = asset_key
+        item.unlock_type = unlock_type
+        item.unlock_value = unlock_value
+        item.price_coins = price
+        item.sort_order = sort
     await session.commit()
 
 

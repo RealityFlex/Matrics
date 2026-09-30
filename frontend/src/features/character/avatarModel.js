@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import avatarUrl from '../../assets/models/avatar_f.glb?url';
 import scholarAvatarUrl from '../../assets/models/avatar_scholar_f.glb?url';
+import nightOwlAvatarUrl from '../../assets/models/avatar_night_owl_f.glb?url';
 
 export { avatarUrl };
 
 const AVATAR_BY_KEY = {
   'character:student_basic': avatarUrl,
-  'character:scholar': scholarAvatarUrl
+  'character:scholar': scholarAvatarUrl,
+  'character:night_owl': nightOwlAvatarUrl
 };
 
 export function avatarUrlFor(characterKey) {
@@ -29,7 +31,7 @@ const CLIP_ALIASES = {
 };
 
 /** Целевой рост персонажа в единицах сцены (до множителя GROWTH_SCALE) */
-export const AVATAR_HEIGHT = 2.05;
+export const AVATAR_HEIGHT = 3.075;
 
 export function hideStaticAvatarMeshes(root) {
   root.traverse((child) => {

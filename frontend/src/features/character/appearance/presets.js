@@ -4,14 +4,15 @@
  * Ключ = asset_key сета из character-service (например 'character:scholar').
  * Сейчас сеты процедурные: аксессуар на голове + цветное кольцо под персонажем,
  * окружение — свет, туман, фон и перекраска материалов комнаты.
- * Базовая модель — `avatar_f.glb`. Сет «Эрудит» подменяет её на
- * `avatar_scholar_f.glb` (тот же набор клипов).
+ * Базовая модель — `avatar_f.glb`. Сеты «Эрудит» и «Полуночник» подменяют её
+ * на отдельные GLB (`avatar_scholar_f.glb`, `avatar_night_owl_f.glb`) с тем же
+ * набором клипов.
  */
 
 export const CHARACTER_PRESETS = {
   'character:student_basic': { ring: null, accessory: null },
   'character:scholar': { ring: '#5eead4', accessory: null },
-  'character:night_owl': { ring: '#818cf8', accessory: 'beanie', accessoryColor: '#312e81', accentColor: '#a5b4fc' },
+  'character:night_owl': { ring: '#818cf8', accessory: null },
   'character:champion': { ring: '#ffa94d', accessory: 'crown', accessoryColor: '#f59e0b', accentColor: '#fde68a' },
   'character:mentor': { ring: '#4ade80', accessory: 'star', accessoryColor: '#fbbf24', accentColor: '#fef3c7' }
 };

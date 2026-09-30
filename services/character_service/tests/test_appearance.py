@@ -61,8 +61,10 @@ class TestAppearance:
         assert len(data["characters"]) == 5 and len(data["environments"]) == 5
         basic = next(i for i in data["characters"] if i["code"] == "student_basic")
         scholar = next(i for i in data["characters"] if i["code"] == "scholar")
+        night_owl = next(i for i in data["characters"] if i["code"] == "night_owl")
         assert basic["unlocked"] is True
         assert scholar["unlocked"] is False and scholar["progress"] == {"current": 0, "required": 5}
+        assert night_owl["price_coins"] == 150 and night_owl["unlocked"] is False
 
     @pytest.mark.asyncio
     async def test_locked_set_cannot_be_equipped(self, client, world):
