@@ -1,5 +1,5 @@
 """
-Мини-игра «Забег до пары»: попытки с наградой, античит, рейтинг группы, недельные призы.
+Мини-игра «Забег до пары»: жизни за учёбу, античит, рейтинг группы, недельные призы.
 """
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
@@ -9,8 +9,7 @@ from sqlalchemy import select
 
 from services.competition_service import minigame
 from services.shared.models.character import Character
-from services.shared.models.lesson import Lesson, LessonAttendance
-from services.shared.models.minigame import GameRun, GameWeeklyPrize
+from services.shared.models.minigame import GameLives, GameRun, GameWeeklyPrize
 from services.shared.models.social import GroupMember, StudentGroup
 from services.shared.models.user import User
 from services.shared.timeutil import utcnow
@@ -19,7 +18,10 @@ BASE = "/games/runner"
 
 
 @pytest.fixture(autouse=True)
-def mocked_side_effects():
+def mocked_side_effects(monkeypatch):
+    monkeypatch.setenv("GAME_LIVES_MAX", "20")
+    monkeypatch.setenv("GAME_LIVES_START", "20")
+    monkeypatch.setenv("GAME_LIFE_REGEN_MINUTES", "120")
     with patch.object(minigame, "grant_reward", AsyncMock(return_value={"coins_added": 1})) as grant, \
          patch.object(minigame, "notify_bot", AsyncMock(return_value=True)) as notify:
         yield {"grant": grant, "notify": notify}
@@ -107,24 +109,44 @@ async def test_implausible_results_rejected(client, test_db_session, run_game):
 
 
 @pytest.mark.asyncio
-async def test_rewarded_runs_limited_and_extended_by_lessons(client, test_db_session, run_game):
+async def test_start_requires_a_life(client, test_db_session, run_game, monkeypatch):
+    monkeypatch.setenv("GAME_LIVES_MAX", "1")
+    monkeypatch.setenv("GAME_LIVES_START", "1")
     user = await make_user(test_db_session, "limited")
-    for _ in range(3):
-        start, response = await run_game(user.id, distance=300, coins=20)
-        assert start["rewarded"] is True and response.json()["coins_awarded"] == 2
     start, response = await run_game(user.id, distance=300, coins=20)
-    assert start["rewarded"] is False
-    assert response.json()["coins_awarded"] == 0 and response.json()["score"] == 400  # в рейтинг идёт
+    assert start["rewarded"] is True and response.status_code == 200
+    denied = await client.post(f"{BASE}/start?user_id={user.id}")
+    assert denied.status_code == 403
+    overview = (await client.get(f"{BASE}/overview?user_id={user.id}")).json()
+    assert overview["lives"] == 0 and overview["lives_max"] == 1
 
-    # Посещённая сегодня пара даёт ещё 2 забега с наградой
-    lesson = Lesson(name="Матан", start_time=utcnow() - timedelta(hours=1), end_time=utcnow(), created_by=user.id)
-    test_db_session.add(lesson)
-    await test_db_session.flush()
-    test_db_session.add(LessonAttendance(lesson_id=lesson.id, user_id=user.id, attended_at=utcnow()))
+
+@pytest.mark.asyncio
+async def test_life_regenerates_over_time(client, test_db_session, monkeypatch):
+    monkeypatch.setenv("GAME_LIVES_MAX", "3")
+    monkeypatch.setenv("GAME_LIVES_START", "0")
+    monkeypatch.setenv("GAME_LIFE_REGEN_MINUTES", "60")
+    user = await make_user(test_db_session, "regen")
+    test_db_session.add(GameLives(user_id=user.id, lives=0, last_regen_at=utcnow() - timedelta(hours=2, minutes=5)))
     await test_db_session.commit()
     overview = (await client.get(f"{BASE}/overview?user_id={user.id}")).json()
-    assert overview["lessons_today"] == 1
-    assert overview["rewarded_runs_total"] == 5 and overview["rewarded_runs_left"] == 2
+    assert overview["lives"] == 2
+    assert overview["next_life_at"]
+
+
+@pytest.mark.asyncio
+async def test_abandon_refunds_life(client, test_db_session, monkeypatch):
+    monkeypatch.setenv("GAME_LIVES_MAX", "1")
+    monkeypatch.setenv("GAME_LIVES_START", "1")
+    user = await make_user(test_db_session, "quitter")
+    start = (await client.post(f"{BASE}/start?user_id={user.id}")).json()
+    assert start["lives"] == 0
+    abandoned = await client.post(f"{BASE}/runs/{start['run_id']}/abandon?user_id={user.id}")
+    assert abandoned.status_code == 200, abandoned.text
+    overview = (await client.get(f"{BASE}/overview?user_id={user.id}")).json()
+    assert overview["lives"] == 1
+    again = await client.post(f"{BASE}/runs/{start['run_id']}/abandon?user_id={user.id}")
+    assert again.status_code == 409
 
 
 @pytest.mark.asyncio

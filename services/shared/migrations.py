@@ -80,7 +80,7 @@ FOREIGN_KEYS = [
 ]
 
 NEW_TABLES = ["lesson_misses", "character_snapshots", "appearance_sets", "user_appearance_unlocks", "group_curators",
-              "organizations", "lesson_group_goals", "support_requests"]
+              "organizations", "lesson_group_goals", "support_requests", "game_lives"]
 
 
 def _new_tables():

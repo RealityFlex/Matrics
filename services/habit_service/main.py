@@ -490,7 +490,9 @@ async def log_habit_completion(
             "user_id": habit.user_id,
             "coins": normalized_coins,
             "intelligence_points": normalized_intelligence,
-            "satisfaction": normalized_satisfaction
+            "satisfaction": normalized_satisfaction,
+            "source": "habit_completion",
+            "source_ref": f"habit:{habit.id}",
         })
         
         # Проверить соревнования после логирования привычки

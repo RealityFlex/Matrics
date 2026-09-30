@@ -1,13 +1,9 @@
 """
 Мини-игра «Забег до пары» — раннер на главном экране мини-приложения.
 
-Связь с учёбой: забеги с наградой ограничены в день и пополняются за посещённые пары
-(GAME_BASE_RUNS + GAME_RUNS_PER_LESSON × пар сегодня), монеты из игры ограничены дневным
-лимитом — основным источником прогресса остаётся посещаемость. Сверх лимита можно играть
-«на рейтинг» без монет.
-
-Соревнование: недельный рейтинг группы (лучший забег каждого), по итогам недели топ-3
-группы получают призовые монеты, а бот публикует итоги в чате группы.
+Забег стоит жизнь. Жизни выдаются за учёбу (задача, привычка, пара, достижение)
+и восстанавливаются по таймеру — игра не бесконечная. Монеты из забега ограничены
+дневным потолком. Недельный рейтинг группы и призы топ-3 сохраняются.
 
 Античит (MVP): очки считает сервер (дистанция + монеты × SCORE_PER_COIN); дистанция не
 может превышать максимальную скорость × длительность, длительность — реальное время
@@ -31,8 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from services.shared.auth import require_verified_user, resolve_acting_user_id
 from services.shared.bot_notify import grant_reward, notify_bot
 from services.shared.database import get_db
+from services.shared.game_lives import consume_life, load_lives, refund_life, snapshot as lives_snapshot
 from services.shared.models.character import Character
-from services.shared.models.lesson import LessonAttendance
 from services.shared.models.minigame import GameRun, GameWeeklyPrize
 from services.shared.models.social import GroupMember, StudentGroup
 from services.shared.models.user import User
@@ -54,8 +50,6 @@ def _int_env(name: str, default: int) -> int:
 def settings() -> Dict[str, object]:
     prizes = [int(x) for x in os.getenv("GAME_WEEKLY_PRIZES", "15,10,5").split(",") if x.strip().isdigit()]
     return {
-        "base_runs": _int_env("GAME_BASE_RUNS", 3),
-        "runs_per_lesson": _int_env("GAME_RUNS_PER_LESSON", 2),
         "daily_coin_cap": _int_env("GAME_DAILY_COIN_CAP", 30),
         "max_coins_per_run": _int_env("GAME_MAX_COINS_PER_RUN", 10),
         "pickups_per_coin": max(1, _int_env("GAME_PICKUPS_PER_COIN", 10)),
@@ -75,6 +69,9 @@ class StartResponse(BaseModel):
     run_id: int
     seed: int
     rewarded: bool
+    lives: int
+    lives_max: int
+    next_life_at: Optional[str] = None
     rewarded_runs_left: int
 
 
@@ -109,25 +106,13 @@ def week_bounds(monday: date) -> tuple[datetime, datetime]:
 async def daily_status(db: AsyncSession, user_id: int, now: Optional[datetime] = None) -> Dict[str, int]:
     cfg = settings()
     start, end = day_bounds(local_today(now))
-    lessons_today = (await db.execute(
-        select(func.count(LessonAttendance.id)).where(
-            LessonAttendance.user_id == user_id,
-            LessonAttendance.attended_at >= start,
-            LessonAttendance.attended_at < end,
+    coins_today = (await db.execute(
+        select(func.coalesce(func.sum(GameRun.coins_awarded), 0)).where(
+            GameRun.user_id == user_id, GameRun.game == GAME, GameRun.status == "finished",
+            GameRun.started_at >= start, GameRun.started_at < end,
         )
     )).scalar() or 0
-    used, coins_today = (await db.execute(
-        select(
-            func.count(GameRun.id).filter(GameRun.rewarded.is_(True), GameRun.status == "finished"),
-            func.coalesce(func.sum(GameRun.coins_awarded), 0),
-        ).where(GameRun.user_id == user_id, GameRun.game == GAME, GameRun.started_at >= start, GameRun.started_at < end)
-    )).one()
-    total = int(cfg["base_runs"]) + int(cfg["runs_per_lesson"]) * int(lessons_today)
     return {
-        "lessons_today": int(lessons_today),
-        "rewarded_runs_total": total,
-        "rewarded_runs_used": int(used or 0),
-        "rewarded_runs_left": max(0, total - int(used or 0)),
         "coins_today": int(coins_today or 0),
         "daily_coin_cap": int(cfg["daily_coin_cap"]),
     }
@@ -283,8 +268,13 @@ async def overview(
         await settle_weekly_prizes(db, group, today)
     board = await weekly_board(db, group.id if group else None, week_start(today))
     me = next((entry for entry in board if entry["user_id"] == user_id), None)
+    lives = lives_snapshot(await load_lives(db, user_id))
+    await db.commit()
     return {
         **(await daily_status(db, user_id)),
+        **lives,
+        "rewarded_runs_left": lives["lives"],
+        "rewarded_runs_total": lives["lives_max"],
         "best_score": await best_score(db, user_id),
         "week": {"start": week_start(today).isoformat(), "best": me["score"] if me else 0, "rank": me["rank"] if me else None},
         "scope": "group" if group else "all",
@@ -292,7 +282,6 @@ async def overview(
         "players": len(board),
         "top": [{**entry, "is_me": entry["user_id"] == user_id} for entry in board[:5]],
         "weekly_prizes": settings()["weekly_prizes"],
-        "runs_per_lesson": settings()["runs_per_lesson"],
         "last_week_prize": await last_prize(db, user_id, today),
         "score_per_coin": SCORE_PER_COIN,
     }
@@ -326,19 +315,36 @@ async def start_run(
 ):
     if (await db.execute(select(User.id).where(User.id == user_id))).scalar() is None:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
-    # Одновременно активен только один забег
-    await db.execute(
-        update(GameRun).where(GameRun.user_id == user_id, GameRun.game == GAME, GameRun.status == "started")
-        .values(status="abandoned", finished_at=utcnow())
+    pending = (await db.execute(
+        select(GameRun.id).where(GameRun.user_id == user_id, GameRun.game == GAME, GameRun.status == "started")
+    )).scalars().all()
+    if pending:
+        abandoned = await db.execute(
+            update(GameRun)
+            .where(GameRun.id.in_(pending), GameRun.status == "started")
+            .values(status="abandoned", finished_at=utcnow())
+        )
+        if abandoned.rowcount:
+            await refund_life(db, user_id)
+    row = await consume_life(db, user_id)
+    if row is None:
+        await db.commit()
+        raise HTTPException(
+            status_code=403,
+            detail="Нет попыток. Выполните задачу, получите достижение или дождитесь восстановления жизни.",
+        )
+    run = GameRun(
+        user_id=user_id, game=GAME, seed=secrets.randbelow(2**31 - 1) + 1, rewarded=True,
+        status="started", started_at=utcnow(),
     )
-    status = await daily_status(db, user_id)
-    rewarded = status["rewarded_runs_left"] > 0 and status["coins_today"] < status["daily_coin_cap"]
-    run = GameRun(user_id=user_id, game=GAME, seed=secrets.randbelow(2**31 - 1) + 1, rewarded=rewarded,
-                  status="started", started_at=utcnow())
     db.add(run)
     await db.commit()
-    return StartResponse(run_id=run.id, seed=run.seed, rewarded=rewarded,
-                         rewarded_runs_left=status["rewarded_runs_left"])
+    lives = lives_snapshot(row)
+    return StartResponse(
+        run_id=run.id, seed=run.seed, rewarded=True,
+        lives=lives["lives"], lives_max=lives["lives_max"], next_life_at=lives["next_life_at"],
+        rewarded_runs_left=lives["lives"],
+    )
 
 
 @router.post("/runs/{run_id}/finish")
@@ -372,7 +378,7 @@ async def finish_run(
     run.score = body.distance + body.coins * SCORE_PER_COIN
     status = await daily_status(db, user_id)
     award = 0
-    if run.rewarded and status["rewarded_runs_left"] > 0:
+    if run.rewarded:
         award = min(coins_for_pickups(body.coins), max(0, status["daily_coin_cap"] - status["coins_today"]))
     run.coins_awarded = award
     run.status = "finished"
@@ -395,6 +401,8 @@ async def finish_run(
     board = await weekly_board(db, group.id if group else None, week_start(today))
     me = next((entry for entry in board if entry["user_id"] == user_id), None)
     after = await daily_status(db, user_id)
+    lives = lives_snapshot(await load_lives(db, user_id))
+    await db.commit()
     return {
         "run_id": run.id,
         "score": run.score,
@@ -408,7 +416,32 @@ async def finish_run(
         "week": {"best": me["score"] if me else run.score, "rank": me["rank"] if me else None, "players": len(board)},
         "scope": "group" if group else "all",
         "group_name": group.name if group else None,
-        "rewarded_runs_left": after["rewarded_runs_left"],
+        "lives": lives["lives"],
+        "lives_max": lives["lives_max"],
+        "next_life_at": lives["next_life_at"],
+        "rewarded_runs_left": lives["lives"],
         "coins_today": after["coins_today"],
         "daily_coin_cap": after["daily_coin_cap"],
     }
+
+
+@router.post("/runs/{run_id}/abandon")
+async def abandon_run(
+    run_id: int,
+    user_id: int = Depends(require_verified_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Выход без результата: жизнь возвращается, забег не идёт в рейтинг."""
+    result = await db.execute(
+        update(GameRun)
+        .where(GameRun.id == run_id, GameRun.user_id == user_id, GameRun.status == "started")
+        .values(status="abandoned", finished_at=utcnow())
+    )
+    if not result.rowcount:
+        run = (await db.execute(select(GameRun).where(GameRun.id == run_id))).scalar_one_or_none()
+        if run is None or run.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Забег не найден")
+        raise HTTPException(status_code=409, detail="Результат этого забега уже засчитан")
+    row = await refund_life(db, user_id)
+    await db.commit()
+    return {"ok": True, **lives_snapshot(row)}

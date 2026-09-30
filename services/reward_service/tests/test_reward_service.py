@@ -82,6 +82,7 @@ class TestRewardLedger:
         data = response.json()
         assert data["satisfaction_added"] == 5
         assert data["character"] is not None
+        assert data["lives_added"] == 1
 
         rows = (await test_db_session.execute(
             select(Transaction).where(Transaction.user_id == sample_user["id"])

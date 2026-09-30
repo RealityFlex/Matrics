@@ -978,7 +978,9 @@ async def complete_task(task_id: int, db: AsyncSession = Depends(get_db)):
             "user_id": task.user_id,
             "coins": task.reward_coins,
             "intelligence_points": task.reward_intelligence_points,
-            "satisfaction": task.reward_satisfaction
+            "satisfaction": task.reward_satisfaction,
+            "source": "task_completion",
+            "source_ref": f"task:{task.id}",
         })
         
         # Проверить достижения после завершения задачи

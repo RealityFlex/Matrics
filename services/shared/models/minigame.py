@@ -15,7 +15,7 @@ class GameRun(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     game = Column(String(32), nullable=False, default="runner")
     seed = Column(Integer, nullable=False)
-    # Забег с наградой (в пределах дневного лимита попыток) или тренировочный — только в рейтинг
+    # Забег всегда стоит жизнь; монеты — если не исчерпан дневной потолок
     rewarded = Column(Boolean, nullable=False, default=False)
     # started | finished | rejected | abandoned
     status = Column(String(16), nullable=False, default="started")
@@ -52,3 +52,12 @@ class GameWeeklyPrize(Base):
     __table_args__ = (
         UniqueConstraint("game", "group_id", "week_start", "place", name="uq_game_weekly_prize_place"),
     )
+
+
+class GameLives(Base):
+    """Попытки мини-игры: тратятся на забег, копятся за учёбу и восстанавливаются со временем."""
+    __tablename__ = "game_lives"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    lives = Column(Integer, nullable=False, default=0)
+    last_regen_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

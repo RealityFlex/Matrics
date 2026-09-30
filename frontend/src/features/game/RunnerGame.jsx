@@ -13,10 +13,10 @@ import {
 } from 'lucide-react';
 import { Badge, Button, Spinner, StateView } from '../../components/ui/index.jsx';
 import { StatIcon, StatValue } from '../../components/ui/icons.jsx';
-import { finishGameRun, getGameLeaderboard, startGameRun } from '../../services/game.js';
+import { abandonGameRun, finishGameRun, getGameLeaderboard, startGameRun } from '../../services/game.js';
 import { haptic, maxBackButton } from '../../utils/maxBridge.js';
 import { RunnerEngine } from './runnerEngine.js';
-import '../../styles/game.css';
+import { formatNextLife, livesOf } from './lives.js';
 
 function Leaderboard({ userId }) {
   const [scope, setScope] = useState('group');
@@ -94,6 +94,7 @@ export function RunnerGame({ isOpen, onClose, userId, overview, onFinished, char
   const stageRef = useRef(null);
   const engineRef = useRef(null);
   const runRef = useRef(null);
+  const finishingRef = useRef(false);
   const [phase, setPhase] = useState('intro');
   const [ready, setReady] = useState(false);
   const [hud, setHud] = useState({ score: 0, coins: 0, distance: 0 });
@@ -112,6 +113,7 @@ export function RunnerGame({ isOpen, onClose, userId, overview, onFinished, char
         setPhase('result');
         return;
       }
+      finishingRef.current = true;
       setPhase('submitting');
       setError(null);
       try {
@@ -123,6 +125,7 @@ export function RunnerGame({ isOpen, onClose, userId, overview, onFinished, char
       } catch (submitError) {
         setError(submitError?.message ?? 'Не удалось сохранить результат');
       } finally {
+        finishingRef.current = false;
         setPhase('result');
       }
     },
@@ -150,6 +153,11 @@ export function RunnerGame({ isOpen, onClose, userId, overview, onFinished, char
       engine.dispose();
       engineRef.current = null;
       setReady(false);
+      const run = runRef.current;
+      runRef.current = null;
+      if (run?.run_id && !finishingRef.current) {
+        abandonGameRun(userId, run.run_id).catch(() => {});
+      }
     };
     // submit стабилен в пределах открытия экрана
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -226,8 +234,9 @@ export function RunnerGame({ isOpen, onClose, userId, overview, onFinished, char
 
   if (!isOpen) return null;
 
-  const runsLeft = serverResult?.rewarded_runs_left ?? overview?.rewarded_runs_left;
-  const runsTotal = overview?.rewarded_runs_total;
+  const lives = livesOf({ ...overview, lives: serverResult?.lives ?? overview?.lives, lives_max: serverResult?.lives_max ?? overview?.lives_max });
+  const runsLeft = lives.current;
+  const runsTotal = lives.max;
   const inGame = phase === 'running' || phase === 'paused' || phase === 'countdown';
 
   return createPortal(
@@ -241,7 +250,7 @@ export function RunnerGame({ isOpen, onClose, userId, overview, onFinished, char
             <span className="game-hud__meta">
               <StatValue kind="coins" value={hud.coins} size={14} />
               <span className="tabular">{hud.distance} м</span>
-              {!rewarded ? <Badge>тренировка</Badge> : null}
+              {!rewarded ? <Badge>без монет — дневной лимит</Badge> : null}
             </span>
           </div>
         ) : (
@@ -271,7 +280,7 @@ export function RunnerGame({ isOpen, onClose, userId, overview, onFinished, char
         <div className="game-sheet">
           <div className="game-sheet__head">
             <h2 className="game-sheet__title">Забег до пары</h2>
-            <p className="game-sheet__lead">Беги по кампусу, собирай монеты и обгоняй одногруппников в рейтинге недели.</p>
+            <p className="game-sheet__lead">Одна жизнь — один забег. Жизни даются за задачи, пары и достижения и восстанавливаются сами.</p>
           </div>
           <ul className="game-rules">
             <li>
@@ -290,10 +299,14 @@ export function RunnerGame({ isOpen, onClose, userId, overview, onFinished, char
           {overview ? (
             <div className="game-limits">
               <div>
-                <b className="tabular">{runsLeft ?? 0}</b> из {runsTotal ?? 0} забегов с наградой сегодня
-                {overview.runs_per_lesson ? (
-                  <span className="game-limits__hint">Каждая посещённая пара добавляет ещё {overview.runs_per_lesson}</span>
-                ) : null}
+                <b className="tabular">{runsLeft ?? 0}</b> из {runsTotal ?? 0} жизней
+                <span className="game-limits__hint">
+                  {runsLeft > 0
+                    ? 'Забег тратит одну жизнь'
+                    : formatNextLife(overview.next_life_at)
+                      ? `Следующая жизнь через ${formatNextLife(overview.next_life_at)}`
+                      : 'Выполните задачу или получите достижение'}
+                </span>
               </div>
               <div className="game-limits__coins">
                 <StatIcon kind="coins" size={16} />
@@ -303,8 +316,8 @@ export function RunnerGame({ isOpen, onClose, userId, overview, onFinished, char
           ) : null}
           {error ? <div className="inline-error" role="alert">{error}</div> : null}
           <div className="game-sheet__actions">
-            <Button size="lg" block icon={<Play size={18} />} loading={phase === 'starting' || !ready} onClick={startRun}>
-              {ready ? 'Начать забег' : 'Загружаем трассу…'}
+            <Button size="lg" block icon={<Play size={18} />} loading={phase === 'starting' || !ready} onClick={startRun} disabled={runsLeft <= 0}>
+              {!ready ? 'Загружаем трассу…' : runsLeft > 0 ? 'Начать забег' : 'Нет попыток'}
             </Button>
             <Button variant="secondary" block icon={<Trophy size={16} />} onClick={() => setShowBoard((value) => !value)}>
               Рейтинг недели
@@ -376,13 +389,14 @@ export function RunnerGame({ isOpen, onClose, userId, overview, onFinished, char
                 </div>
               ) : (
                 <div className="game-outcome__row">
-                  {serverResult.rewarded
-                    ? serverResult.coins_today >= serverResult.daily_coin_cap
-                      ? 'Дневной лимит монет из игры набран — результат идёт в рейтинг.'
-                      : 'Соберите больше монет на трассе — 10 штук дают 1 монету персонажу.'
-                    : 'Тренировочный забег: попытки с наградой на сегодня закончились. Посещённая пара добавит ещё.'}
+                  {serverResult.coins_today >= serverResult.daily_coin_cap
+                    ? 'Дневной лимит монет из игры набран — результат идёт в рейтинг.'
+                    : 'Соберите больше монет на трассе — 10 штук дают 1 монету персонажу.'}
                 </div>
               )}
+              <div className="game-outcome__row">
+                Осталось попыток: {runsLeft} из {runsTotal}
+              </div>
               <div className="game-outcome__row">
                 <Trophy size={16} aria-hidden="true" className="stat-tone--coins" />
                 {serverResult.week.rank
@@ -393,8 +407,8 @@ export function RunnerGame({ isOpen, onClose, userId, overview, onFinished, char
           ) : null}
 
           <div className="game-sheet__actions">
-            <Button size="lg" block icon={<RotateCcw size={18} />} onClick={startRun}>
-              Ещё раз
+            <Button size="lg" block icon={<RotateCcw size={18} />} onClick={startRun} disabled={runsLeft <= 0}>
+              {runsLeft > 0 ? 'Ещё раз' : 'Нет попыток'}
             </Button>
             <Button variant="secondary" block icon={<Trophy size={16} />} onClick={() => setShowBoard((value) => !value)}>
               Рейтинг недели

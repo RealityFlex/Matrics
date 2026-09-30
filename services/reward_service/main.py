@@ -9,6 +9,7 @@ from typing import Optional, List, Dict, Any
 import logging
 
 from services.shared.database import get_db, init_db
+from services.shared.game_lives import add_lives, lives_for_source
 from services.shared.migrations import apply_hackathon_migrations
 from services.shared.models.economy import Transaction, TransactionType
 from services.shared.character_mood import mood_from_satisfaction, growth_stage
@@ -44,6 +45,8 @@ class RewardResponse(BaseModel):
     coins_total: Optional[int] = None
     character: Optional[Dict[str, Any]] = None
     unlocked_sets: List[Dict[str, Any]] = []
+    lives_added: int = 0
+    lives: Optional[int] = None
 
 # FastAPI приложение
 app = FastAPI(title="Reward Service", version="1.1.0")
@@ -206,6 +209,16 @@ async def grant_rewards(reward_req: RewardRequest, db: AsyncSession = Depends(ge
             newly_completed.extend(await _check_achievements(achievement_service, reward_req.user_id, "lessons_attended"))
             newly_completed.extend(await _check_achievements(achievement_service, reward_req.user_id, "attendance_streak"))
         response.achievements_earned = newly_completed
+
+        # Жизнь за саму учёбу; отдельно — за достижение (source=achievement), без двойного счёта.
+        life_bonus = lives_for_source(reward_req.source)
+        if life_bonus > 0:
+            try:
+                granted = await add_lives(db, reward_req.user_id, life_bonus)
+                response.lives_added = granted.get("lives_added", 0)
+                response.lives = granted.get("lives")
+            except Exception as e:
+                logger.warning("Не удалось начислить жизни мини-игры: %s", e)
 
         # 7. Автоматическая разблокировка сетов кастомизации
         gained = reward_req.coins > 0 or reward_req.intelligence_points > 0 or reward_req.source in ATTENDANCE_SOURCES

@@ -28,6 +28,7 @@ import { toast } from '../../components/ui/toast.jsx';
 import { Plus } from 'lucide-react';
 import { Button, StateView } from '../../components/ui/index.jsx';
 import { RewardChips } from '../../components/ui/icons.jsx';
+import { livesRewardText } from '../game/lives.js';
 import '../../styles/features-core.css';
 
 const rewardsOf = (r) => ({
@@ -320,12 +321,14 @@ export function TasksSection({ isActive }) {
 
   const handleCompleteTask = async (task) => {
     try {
-      await completeTaskRequest(task.id);
+      const result = await completeTaskRequest(task.id);
+      const livesAdded = result?.rewards?.lives_added;
       toast.reward(
         'Задача выполнена',
         <>
           {task.title}
           <RewardChips rewards={rewardsOf(task)} />
+          {livesRewardText(livesAdded)}
         </>
       );
       await loadTasks();

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Footprints, Play, Trophy } from 'lucide-react';
+import { Footprints, Heart, Play, Trophy } from 'lucide-react';
 import { Badge, Button, Card, Skeleton } from '../../components/ui/index.jsx';
 import { StatIcon } from '../../components/ui/icons.jsx';
 import { getGameOverview } from '../../services/game.js';
@@ -7,10 +7,11 @@ import { useAppDispatch, useAppState } from '../../state/AppProvider.jsx';
 import { useRefreshUserAndCharacter } from '../../hooks/useRefreshUserAndCharacter.js';
 import { toast } from '../../components/ui/toast.jsx';
 import { RunnerGame } from './RunnerGame.jsx';
+import { formatNextLife, livesOf } from './lives.js';
 import '../../styles/game.css';
 
 /**
- * Карточка мини-игры на главном экране: рекорд, место в группе, топ недели и запуск забега.
+ * Карточка мини-игры на главном экране: рекорд, место в группе, жизни и запуск забега.
  */
 export function GameCard({ isActive }) {
   const { user, pendingGame, character } = useAppState();
@@ -19,6 +20,7 @@ export function GameCard({ isActive }) {
   const [overview, setOverview] = useState(null);
   const [state, setState] = useState('loading');
   const [open, setOpen] = useState(false);
+  const [, setTick] = useState(0);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -35,13 +37,27 @@ export function GameCard({ isActive }) {
     if (isActive) load();
   }, [isActive, load]);
 
-  // Диплинк ?startapp=game (кнопка «Играть» из бота)
   useEffect(() => {
-    if (pendingGame && user?.id) {
+    if (!isActive || !overview?.next_life_at) return undefined;
+    const timer = window.setInterval(() => {
+      if (new Date(overview.next_life_at).getTime() <= Date.now()) load();
+      else setTick((n) => n + 1);
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [isActive, overview?.next_life_at, load]);
+
+  const lives = livesOf(overview);
+  const canPlay = Boolean(user?.id) && lives.current > 0;
+
+  useEffect(() => {
+    if (!pendingGame || !user?.id || state !== 'ready') return;
+    dispatch({ type: 'SET_PENDING_GAME', value: false });
+    if (lives.current > 0) {
       setOpen(true);
-      dispatch({ type: 'SET_PENDING_GAME', value: false });
+      return;
     }
-  }, [pendingGame, user?.id, dispatch]);
+    toast.info('Пока нет попыток', 'Выполните задачу, получите достижение или дождитесь восстановления жизни.');
+  }, [pendingGame, user?.id, dispatch, lives.current, state]);
 
   const handleFinished = useCallback(
     (result) => {
@@ -68,6 +84,7 @@ export function GameCard({ isActive }) {
 
   const week = overview?.week;
   const prizes = overview?.weekly_prizes ?? [];
+  const nextLife = formatNextLife(overview?.next_life_at);
 
   return (
     <Card className="game-card">
@@ -92,7 +109,7 @@ export function GameCard({ isActive }) {
       ) : null}
 
       {state === 'error' ? (
-        <p className="game-card__muted">Рейтинг сейчас недоступен — играть всё равно можно.</p>
+        <p className="game-card__muted">Рейтинг сейчас недоступен. Попробуйте обновить экран.</p>
       ) : null}
 
       {state === 'ready' && overview ? (
@@ -107,12 +124,28 @@ export function GameCard({ isActive }) {
               <span className="game-card__stat-label">место</span>
             </div>
             <div className="game-card__stat">
-              <span className="game-card__stat-value tabular">
-                {overview.rewarded_runs_left}/{overview.rewarded_runs_total}
+              <span className="game-card__lives" aria-label={`Жизни ${lives.current} из ${lives.max}`}>
+                {Array.from({ length: lives.max }, (_, index) => (
+                  <Heart
+                    key={index}
+                    size={16}
+                    fill={index < lives.current ? 'currentColor' : 'none'}
+                    className={index < lives.current ? 'game-card__heart is-full' : 'game-card__heart'}
+                  />
+                ))}
               </span>
-              <span className="game-card__stat-label">забегов с наградой</span>
+              <span className="game-card__stat-label">
+                {lives.current > 0 ? 'попытки' : nextLife ? `ещё ${nextLife}` : 'нет попыток'}
+              </span>
             </div>
           </div>
+
+          {lives.current === 0 ? (
+            <p className="game-card__muted">
+              Забег открывается за учёбу: выполните задачу, отметьтесь на паре или получите достижение.
+              {nextLife ? ` Следующая жизнь через ${nextLife}.` : ''}
+            </p>
+          ) : null}
 
           {overview.top?.length ? (
             <ol className="game-card__top">
@@ -142,8 +175,8 @@ export function GameCard({ isActive }) {
         </>
       ) : null}
 
-      <Button block icon={<Play size={18} />} onClick={() => setOpen(true)} disabled={!user?.id}>
-        Играть
+      <Button block icon={<Play size={18} />} onClick={() => setOpen(true)} disabled={!canPlay || state === 'loading'}>
+        {state === 'loading' ? 'Загружаем…' : canPlay ? 'Играть' : 'Нет попыток'}
       </Button>
 
       <RunnerGame

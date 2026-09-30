@@ -17,6 +17,7 @@ import { toast } from '../../components/ui/toast.jsx';
 import { Plus } from 'lucide-react';
 import { Button } from '../../components/ui/index.jsx';
 import { RewardChips } from '../../components/ui/icons.jsx';
+import { livesRewardText } from '../game/lives.js';
 import { getFrequencyLabel } from './frequency.js';
 import '../../styles/features-core.css';
 
@@ -268,7 +269,7 @@ export function HabitsSection({ isActive }) {
 
   const handleCompleteHabit = async (habit) => {
     try {
-      await completeHabitRequest(habit.id);
+      const result = await completeHabitRequest(habit.id);
       const state = habitStateMap.get(habit.id);
       const frequency = state?.frequency || habit.frequency || 'daily';
       setHabitActionStatus(habit.id, 'complete', frequency);
@@ -277,6 +278,7 @@ export function HabitsSection({ isActive }) {
         <>
           {habit.name}
           <RewardChips rewards={rewardsOf(habit)} />
+          {livesRewardText(result?.rewards?.lives_added)}
         </>
       );
       await loadHabits();

@@ -22,3 +22,7 @@ export function finishGameRun(userId, runId, { distance, coins, durationMs }) {
     duration_ms: Math.floor(durationMs)
   });
 }
+
+export function abandonGameRun(userId, runId) {
+  return apiPost(`${BASE}/runs/${runId}/abandon?user_id=${userId}`);
+}

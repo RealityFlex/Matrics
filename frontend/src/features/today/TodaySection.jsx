@@ -16,6 +16,7 @@ import { joinByCode } from '../../services/users.js';
 import { haptic, shareContent } from '../../utils/maxBridge.js';
 import { loadAppConfig } from '../../utils/appConfig.js';
 import { Card } from '../../components/ui/index.jsx';
+import { livesRewardText } from '../game/lives.js';
 
 const MOOD_LABELS = {
   ecstatic: 'в восторге',
@@ -117,7 +118,10 @@ export function TodaySection({ isActive }) {
         setBurst({ id: Date.now(), ...rewards });
         window.setTimeout(() => setBurst(null), 2600);
         if (result.rewards_status === 'granted') {
-          toast.reward('Посещение отмечено!', `+${rewards.coins} монет · +${rewards.intelligence_points} интеллекта · +${rewards.satisfaction} настроения`);
+          toast.reward(
+            'Посещение отмечено!',
+            `+${rewards.coins} монет · +${rewards.intelligence_points} интеллекта · +${rewards.satisfaction} настроения${livesRewardText(rewards.lives_added)}`
+          );
         } else {
           toast.success('Посещение отмечено', 'Награды будут начислены чуть позже.');
         }

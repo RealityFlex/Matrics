@@ -14,7 +14,7 @@ from services.shared.models.lesson import Lesson, LessonAttendance, LessonMiss, 
 from services.shared.models.appearance import AppearanceSet, UserAppearanceUnlock, AppearanceKind, UnlockType
 from services.shared.models.economy import ShopListing, Transaction, TransactionType
 from services.shared.models.competition import Competition, CompetitionParticipant
-from services.shared.models.minigame import GameRun, GameWeeklyPrize
+from services.shared.models.minigame import GameRun, GameWeeklyPrize, GameLives
 
 __all__ = [
     "User",
@@ -31,6 +31,6 @@ __all__ = [
     "AppearanceSet", "UserAppearanceUnlock", "AppearanceKind", "UnlockType",
     "ShopListing", "Transaction", "TransactionType",
     "Competition", "CompetitionParticipant",
-    "GameRun", "GameWeeklyPrize",
+    "GameRun", "GameWeeklyPrize", "GameLives",
 ]
 
