@@ -7,17 +7,20 @@ from typing import Optional, Tuple
 from enum import Enum
 from dotenv import load_dotenv
 
+from services.shared.gigachat import JSON_SYSTEM, gigachat_client, parse_llm_json
+
 load_dotenv()
 
 
 class HabitLLMProvider(str, Enum):
+    GIGACHAT = "gigachat"
     OPENROUTER = "openrouter"
     OLLAMA = "ollama"
 
 
 class HabitEvaluator:
     def __init__(self):
-        self.provider = os.getenv("LLM_PROVIDER", HabitLLMProvider.OPENROUTER.value)
+        self.provider = (os.getenv("LLM_PROVIDER") or HabitLLMProvider.GIGACHAT.value).strip().lower()
         self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
         self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3")
@@ -136,6 +139,18 @@ BENEFICIAL — если привычка способствует обучени
         )
 
     async def _classify_text(self, prompt: str) -> str:
+        if self.provider == HabitLLMProvider.GIGACHAT.value:
+            client = gigachat_client()
+            if not client.available():
+                raise ValueError("GIGACHAT_CREDENTIALS не установлен")
+            return await client.chat(
+                [
+                    {"role": "system", "content": "Отвечай только одним словом."},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=8,
+                temperature=0.0,
+            )
         if self.provider == HabitLLMProvider.OPENROUTER.value:
             if not self.openrouter_api_key:
                 raise ValueError("OPENROUTER_API_KEY не установлен")
@@ -177,6 +192,19 @@ BENEFICIAL — если привычка способствует обучени
             return (data.get("response", "") or "").strip()
 
     async def _request_rewards(self, prompt: str) -> dict:
+        if self.provider == HabitLLMProvider.GIGACHAT.value:
+            client = gigachat_client()
+            if not client.available():
+                raise ValueError("GIGACHAT_CREDENTIALS не установлен")
+            content = await client.chat(
+                [
+                    {"role": "system", "content": JSON_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=180,
+                temperature=0.3,
+            )
+            return parse_llm_json(content)
         if self.provider == HabitLLMProvider.OPENROUTER.value:
             if not self.openrouter_api_key:
                 raise ValueError("OPENROUTER_API_KEY не установлен")

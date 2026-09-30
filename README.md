@@ -128,9 +128,11 @@ docker compose exec user-service python -m scripts.seed_demo
 | `CHECKIN_ENFORCE_WINDOW` | нет | Отметка только во время пары ±15 минут |
 | `STREAK_FREEZES_PER_30D`, `STREAK_FREEZE_DECISION_MIN`, `STREAK_MISS_GRACE_MIN`, `MISSED_LESSON_SATISFACTION_PENALTY` | нет | Правила серии и «дня без штрафа» |
 | `GAME_BASE_RUNS`, `GAME_RUNS_PER_LESSON`, `GAME_PICKUPS_PER_COIN`, `GAME_MAX_COINS_PER_RUN`, `GAME_DAILY_COIN_CAP`, `GAME_WEEKLY_PRIZES` | нет | Правила мини-игры: попытки с наградой, курс монет, лимиты, недельные призы |
-| `LLM_PROVIDER`, `OPENROUTER_API_KEY`, `OLLAMA_*` | нет | AI-оценка задач. Без ключа работает детерминированная заглушка |
+| `LLM_PROVIDER`, `GIGACHAT_CREDENTIALS`, `GIGACHAT_SCOPE`, `OPENROUTER_API_KEY`, `OLLAMA_*` | нет | AI-оценка задач и целей. По умолчанию GigaChat; без ключа — запасные награды |
 | `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD` | да | Вход в Grafana |
 | `SQL_ECHO` | нет | Логирование SQL (отладка) |
+
+Ключ GigaChat берётся в [Sber Developers](https://developers.sber.ru/studio): проект GigaChat API → Authorization key → `GIGACHAT_CREDENTIALS`. Для физлиц оставьте `GIGACHAT_SCOPE=GIGACHAT_API_PERS`, для юрлиц — `GIGACHAT_API_B2B` или `GIGACHAT_API_CORP`.
 
 ## Внешние сервисы и интеграции
 
@@ -138,7 +140,7 @@ docker compose exec user-service python -m scripts.seed_demo
 |---|---|---|
 | **MAX Bot API** (`platform-api.max.ru`) — сообщения, команды, диплинки | да, основной сценарий доступен в MAX | Веб-версия <http://localhost> проходит тот же сценарий; уведомления видны в логах `max-bot-service` |
 | **MAX Bridge** (`st.max.ru/js/max-web-app.js`) — вход по initData, `openCodeReader` (сканер QR), `HapticFeedback`, `BackButton`, `start_param` | да, внутри MAX | Вне MAX используется вход по нику и ввод кода вручную |
-| OpenRouter / Ollama (LLM) | нет | Заглушка оценки задач |
+| GigaChat / OpenRouter / Ollama (LLM) | нет | Запасные награды, если нет ключа |
 | Google Fonts (Manrope, Inter) | нет | Системный шрифт |
 
 ## Работа с данными

@@ -46,5 +46,8 @@ def sanitize_breakdown(tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "description": str(item.get("description") or "").strip()[:500],
             "order_index": order,
             "depends_on": deps,
+            "reward_coins": item.get("reward_coins"),
+            "reward_intelligence": item.get("reward_intelligence"),
+            "reward_satisfaction": item.get("reward_satisfaction"),
         })
     return cleaned

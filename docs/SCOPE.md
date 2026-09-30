@@ -25,7 +25,7 @@
 | Отметка через чат-бота: `/checkin`, `/start att-…` | `services/max_bot_service/handlers/attendance_handler.py` | Should | Запасной канал без мини-приложения |
 | Серия посещений и «день без штрафа» (streak freeze) | `services/shared/streaks.py`, `services/event_service/streak_service.py` | Should | Антивыгорательная механика: 2 «заморозки» на 30 дней |
 | Кастомизация: 5 образов и 5 локаций с разблокировкой за учёбу | `services/character_service/appearance.py`, `frontend/src/features/character/appearance/presets.js` | Should (kill-фича) | Разблокировка за посещённые пары, серию, задачи, уровень; часть — за монеты. `theme_id` и `organization_id` — задел под бренд вуза |
-| Задачи, цели, AI-оценка задач | `services/task_service` | Should | Альтернативный канал наград. Без ключа LLM работает детерминированная заглушка |
+| Задачи, цели, AI-оценка задач | `services/task_service` | Should | GigaChat проверяет корректность, раскладывает цели и считает награду. Без ключа — запасные значения |
 | Привычки | `services/habit_service` | Should | Альтернативный канал наград |
 | Достижения, включая посещаемость | `services/achievement_service` | Should | Добавлены «Первая пара», «Без пропусков», «Железная дисциплина», «Постоянный слушатель» |
 | Дашборд куратора | `services/statistics_service/curator.py`, `frontend/src/admin/sections/CuratorSection.jsx` | Could (kill-фича №2) | Только чтение: посещаемость, риск-лист, динамика по неделям |

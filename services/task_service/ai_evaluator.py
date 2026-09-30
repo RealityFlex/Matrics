@@ -1,17 +1,16 @@
 """
-Модуль для оценки сложности задачи через нейронную сеть
-Поддерживает OpenRouter (для демонстрации) и Ollama (для продакшена)
+Оценка задач и декомпозиция целей через LLM.
+Провайдер по умолчанию — GigaChat; OpenRouter и Ollama остаются запасными.
 """
 import os
-import re
 import json
 import httpx
-import asyncio
 import logging
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from dotenv import load_dotenv
 
+from services.shared.gigachat import JSON_SYSTEM, gigachat_client, parse_llm_json
 from services.task_service.goal_graph import sanitize_breakdown
 
 load_dotenv()
@@ -21,20 +20,22 @@ STUB_REWARD_COINS = 4
 STUB_REWARD_INTELLIGENCE = 2
 STUB_REWARD_SATISFACTION = 3
 
+
 class LLMProvider(str, Enum):
-    """Провайдеры LLM"""
-    OPENROUTER = "openrouter"  # Для демонстрации (быстро)
-    OLLAMA = "ollama"  # Для продакшена (локально)
+    GIGACHAT = "gigachat"
+    OPENROUTER = "openrouter"
+    OLLAMA = "ollama"
+
 
 class TaskComplexityEvaluator:
-    """Оценщик сложности задачи через LLM"""
+    """Оценщик сложности и корректности задачи через LLM."""
 
     def __init__(self):
-        self.provider = os.getenv("LLM_PROVIDER", LLMProvider.OPENROUTER.value)
+        self.provider = (os.getenv("LLM_PROVIDER") or LLMProvider.GIGACHAT.value).strip().lower()
         self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
         self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3")
-        self.timeout = 12.0
+        self.timeout = float(os.getenv("LLM_TIMEOUT_SECONDS", "25"))
         self.llm_available = True
         self._llm_disabled_reason: Optional[str] = None
         self._stub_rewards = (
@@ -42,9 +43,14 @@ class TaskComplexityEvaluator:
             STUB_REWARD_INTELLIGENCE,
             STUB_REWARD_SATISFACTION,
         )
+        self._gigachat = gigachat_client()
 
-        if self.provider == LLMProvider.OPENROUTER.value and not self.openrouter_api_key:
+        if self.provider == LLMProvider.GIGACHAT.value and not self._gigachat.available():
+            self._disable_llm("GIGACHAT_CREDENTIALS отсутствует")
+        elif self.provider == LLMProvider.OPENROUTER.value and not self.openrouter_api_key:
             self._disable_llm("OPENROUTER_API_KEY отсутствует")
+        elif self.provider not in {item.value for item in LLMProvider}:
+            self._disable_llm(f"Неизвестный LLM_PROVIDER={self.provider}")
 
     def _disable_llm(self, reason: str) -> None:
         if not self.llm_available:
@@ -62,9 +68,30 @@ class TaskComplexityEvaluator:
     def get_stub_rewards(self) -> tuple[int, int, int]:
         return self._stub_rewards
 
-    # ==============================
-    # 🔑 Главный JSON-парсер
-    # ==============================
+    async def _complete_json(
+        self,
+        prompt: str,
+        max_tokens: int = 80,
+        temperature: float = 0.0,
+        system: str = JSON_SYSTEM,
+    ) -> str:
+        if not self.llm_available:
+            raise RuntimeError("LLM недоступен")
+        if self.provider == LLMProvider.GIGACHAT.value:
+            return await self._gigachat.chat(
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        if self.provider == LLMProvider.OPENROUTER.value:
+            return await self._call_openrouter_json(prompt, max_tokens, temperature)
+        if self.provider == LLMProvider.OLLAMA.value:
+            return await self._call_ollama_json(prompt, max_tokens, temperature)
+        raise ValueError(f"Неизвестный провайдер LLM: {self.provider}")
+
     async def _parse_json_response(
         self,
         prompt: str,
@@ -74,26 +101,9 @@ class TaskComplexityEvaluator:
         max_tokens: int = 80,
         temperature: float = 0.0
     ) -> Any:
-        """
-        Универсальный парсер для извлечения одного поля из JSON-ответа LLM.
-        """
-        if not self.llm_available:
-            raise RuntimeError("LLM недоступен")
-
-        if self.provider == LLMProvider.OPENROUTER.value:
-            content = await self._call_openrouter_json(prompt, max_tokens, temperature)
-        elif self.provider == LLMProvider.OLLAMA.value:
-            content = await self._call_ollama_json(prompt, max_tokens, temperature)
-        else:
-            raise ValueError(f"Неизвестный провайдер LLM: {self.provider}")
-
+        content = await self._complete_json(prompt, max_tokens, temperature)
         try:
-            # Очистка от markdown-блоков
-            if content.startswith("```"):
-                content = re.sub(r"^```(?:json)?\s*", "", content)
-                content = re.sub(r"\s*```$", "", content).strip()
-
-            parsed = json.loads(content)
+            parsed = parse_llm_json(content)
             value = parsed.get(field_name)
             if value is None:
                 raise ValueError(f"Поле '{field_name}' отсутствует в JSON: {content}")
@@ -102,14 +112,13 @@ class TaskComplexityEvaluator:
                 if isinstance(value, str):
                     value = value.strip().lower() in ("true", "1", "yes", "spam")
                 return bool(value)
-            elif expected_type is int:
+            if expected_type is int:
                 return int(value)
-            else:
-                return value
-
+            return value
         except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning(
-                f"[JSON Parse Error] field={field_name}, expected={expected_type}, fallback={fallback}, error={e}, raw='{content}'"
+                "JSON parse error field=%s expected=%s fallback=%s error=%s raw=%r",
+                field_name, expected_type, fallback, e, content,
             )
             return fallback
 
@@ -197,6 +206,67 @@ class TaskComplexityEvaluator:
     # ==============================
     # 🧠 Оценка наград
     # ==============================
+    async def assess_task(
+        self,
+        title: str,
+        description: Optional[str] = None,
+        priority: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Проверка на спам и оценка сложности одним запросом к модели."""
+        if not self.llm_available:
+            return {
+                "is_spam": False,
+                "reward_coins": STUB_REWARD_COINS,
+                "reward_intelligence": STUB_REWARD_INTELLIGENCE,
+                "reward_satisfaction": STUB_REWARD_SATISFACTION,
+            }
+
+        task_text = f"Название: {title}"
+        if description:
+            task_text += f"\nОписание: {description}"
+        if priority:
+            task_text += f"\nПриоритет: {priority}"
+
+        prompt = f"""Ты модератор учебного трекера для студентов.
+Проверь задачу и оцени сложность для награды.
+
+SPAM (is_spam=true), если нет образовательной цели: бессмыслица, реклама, мемы, «сделать что-нибудь», развлечения без учёбы.
+NOT SPAM: конкретное учебное действие («выучить 10 слов», «решить 3 задачи по физике»).
+
+Награды только если это не спам, иначе все нули:
+- reward_coins 0–10: трудоёмкость;
+- reward_intelligence 0–15: умственная нагрузка;
+- reward_satisfaction 0–20: ощущение прогресса.
+
+Верни строго JSON:
+{{"is_spam": false, "reward_coins": 0, "reward_intelligence": 0, "reward_satisfaction": 0}}
+
+Задача:
+{task_text}"""
+
+        content = await self._complete_json(prompt, max_tokens=120, temperature=0.0)
+        parsed = parse_llm_json(content)
+        is_spam = parsed.get("is_spam", False)
+        if isinstance(is_spam, str):
+            is_spam = is_spam.strip().lower() in ("true", "1", "yes", "spam")
+        is_spam = bool(is_spam)
+        if is_spam:
+            return {
+                "is_spam": True,
+                "reward_coins": 0,
+                "reward_intelligence": 0,
+                "reward_satisfaction": 0,
+            }
+        coins = max(0, min(10, int(parsed.get("reward_coins") or 0)))
+        intelligence = max(0, min(15, int(parsed.get("reward_intelligence") or 0)))
+        satisfaction = max(0, min(20, int(parsed.get("reward_satisfaction") or 0)))
+        return {
+            "is_spam": False,
+            "reward_coins": coins,
+            "reward_intelligence": intelligence,
+            "reward_satisfaction": satisfaction,
+        }
+
     async def evaluate_task_complexity(
         self,
         title: str,
@@ -354,20 +424,8 @@ class TaskComplexityEvaluator:
 
         for attempt in range(3):
             try:
-                raw = await self._parse_json_response(
-                    prompt=prompt,
-                    field_name="__full__",
-                    fallback={},
-                    max_tokens=200,
-                    temperature=0.7
-                )
-                # Но _parse_json_response не возвращает __full__, поэтому вызываем напрямую:
-                if self.provider == LLMProvider.OPENROUTER.value:
-                    content = await self._call_openrouter_json(prompt, max_tokens=200, temperature=0.7)
-                else:
-                    content = await self._call_ollama_json(prompt, max_tokens=200, temperature=0.7)
-
-                task_data = json.loads(content)
+                content = await self._complete_json(prompt, max_tokens=200, temperature=0.7)
+                task_data = parse_llm_json(content)
                 title = str(task_data.get("title", "")).strip()
                 description = str(task_data.get("description", "")).strip()
                 priority = str(task_data.get("priority", "medium")).lower()
@@ -411,7 +469,10 @@ class TaskComplexityEvaluator:
     {{
       "title": "Чёткое действие (≤120 символов)",
       "description": "Как именно сделать, с измеримым результатом",
-      "depends_on": []
+      "depends_on": [],
+      "reward_coins": 3,
+      "reward_intelligence": 2,
+      "reward_satisfaction": 4
     }}
   ]
 }}
@@ -422,17 +483,14 @@ class TaskComplexityEvaluator:
 - Можно ветвить: два шага с одним и тем же depends_on идут параллельно.
 - Финальный шаг зависит от всех веток, которые нужно свести.
 - Нет циклов и ссылок вперёд.
+- Награды шага по сложности: coins 1–10, intelligence 0–15, satisfaction 0–20.
 - Строгий JSON без лишнего текста.
 
 {goal_text}"""
 
         try:
-            if self.provider == LLMProvider.OPENROUTER.value:
-                content = await self._call_openrouter_json(prompt, max_tokens=900, temperature=0.3)
-            else:
-                content = await self._call_ollama_json(prompt, max_tokens=900, temperature=0.3)
-
-            payload = json.loads(content)
+            content = await self._complete_json(prompt, max_tokens=1100, temperature=0.3)
+            payload = parse_llm_json(content)
             tasks_raw = payload.get("tasks", [])
             if not isinstance(tasks_raw, list):
                 tasks_raw = []
@@ -441,16 +499,23 @@ class TaskComplexityEvaluator:
             for i, t in enumerate(tasks_raw):
                 if not isinstance(t, dict):
                     continue
-                title = str(t.get("title", "")).strip()
+                step_title = str(t.get("title", "")).strip()
                 desc = str(t.get("description", "")).strip()
-                if not title:
+                if not step_title:
                     continue
-                tasks.append({
-                    "title": title[:120],
+                item = {
+                    "title": step_title[:120],
                     "description": desc[:500],
                     "order_index": i,
                     "depends_on": t.get("depends_on") or [],
-                })
+                }
+                for key in ("reward_coins", "reward_intelligence", "reward_satisfaction"):
+                    if t.get(key) is not None:
+                        try:
+                            item[key] = int(t[key])
+                        except (TypeError, ValueError):
+                            pass
+                tasks.append(item)
                 if len(tasks) >= max_tasks:
                     break
 
@@ -458,7 +523,7 @@ class TaskComplexityEvaluator:
                 return sanitize_breakdown(tasks)
 
         except Exception as e:
-            logger.warning(f"Ошибка генерации декомпозиции: {e}")
+            logger.warning("Ошибка генерации декомпозиции: %s: %s", type(e).__name__, e or repr(e))
 
         # Fallback
         return self._build_fallback_tasks(title, description, min_tasks, max_tasks)

@@ -4,6 +4,7 @@ Task Service - Управление задачами
 """
 import asyncio
 import logging
+import os
 from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
@@ -11,7 +12,6 @@ from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_validator
-import random
 import re
 
 from services.shared.database import get_db, init_db
@@ -25,14 +25,8 @@ from services.task_service.goal_graph import dump_depends_on, parse_depends_on
 
 logger = logging.getLogger(__name__)
 
-# Инициализация оценщика сложности
-# Для демонстрации используется OpenRouter (быстро)
-# Для продакшена установите LLM_PROVIDER=ollama и настройте Ollama
-# Переменные окружения:
-#   LLM_PROVIDER=openrouter (по умолчанию) или ollama
-#   OPENROUTER_API_KEY=your_key (для OpenRouter)
-#   OLLAMA_BASE_URL=http://localhost:11434 (для Ollama, по умолчанию)
-#   OLLAMA_MODEL=llama3 (для Ollama, по умолчанию)
+# Оценка задач: GigaChat по умолчанию (LLM_PROVIDER=gigachat).
+# Нужен GIGACHAT_CREDENTIALS из кабинета Sber. Запасные: openrouter, ollama.
 complexity_evaluator = TaskComplexityEvaluator()
 (
     STUB_REWARD_COINS,
@@ -40,7 +34,7 @@ complexity_evaluator = TaskComplexityEvaluator()
     STUB_REWARD_SATISFACTION,
 ) = complexity_evaluator.get_stub_rewards()
 
-LLM_TIMEOUT_SECONDS = 12
+LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "40"))
 MAX_COIN_REWARD = 50
 MAX_INTELLIGENCE_REWARD = 15
 MAX_SATISFACTION_REWARD = 20
@@ -146,18 +140,45 @@ class GoalTaskUpdate(BaseModel):
     due_date: Optional[datetime] = None
 
 
+async def _assess_and_reward(
+    title: str,
+    description: Optional[str] = None,
+    priority: Optional[str] = None,
+) -> tuple[bool, tuple[int, int, int]]:
+    """Проверка корректности и оценка награды через GigaChat (или запасной LLM)."""
+    try:
+        priority_value = priority.value if isinstance(priority, TaskPriority) else priority
+        assessment = await asyncio.wait_for(
+            complexity_evaluator.assess_task(
+                title=title,
+                description=description,
+                priority=priority_value,
+            ),
+            timeout=LLM_TIMEOUT_SECONDS,
+        )
+        if assessment.get("is_spam"):
+            return True, (0, 0, 0)
+        return False, _normalize_reward_values(
+            assessment.get("reward_coins") or 0,
+            assessment.get("reward_intelligence") or 0,
+            assessment.get("reward_satisfaction") or 0,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Оценка задачи через LLM не удалась (%s: %s). Используем запасные награды.",
+            type(exc).__name__,
+            exc or repr(exc),
+        )
+        return False, _get_stub_rewards()
+
+
 async def _calculate_task_rewards(
     title: str,
     description: Optional[str] = None,
     priority: Optional[str] = None
 ) -> tuple[int, int, int]:
-    """
-    Временно выдаем случайные награды без обращения к LLM.
-    """
-    reward_coins = random.randint(1, 5)
-    reward_intelligence = random.randint(1, 4)
-    reward_satisfaction = random.randint(1, 4)
-    return reward_coins, reward_intelligence, reward_satisfaction
+    _, rewards = await _assess_and_reward(title, description, priority)
+    return rewards
 
 
 def _normalize_reward_values(coins: int, intelligence: int, satisfaction: int) -> tuple[int, int, int]:
@@ -194,87 +215,18 @@ def _get_stub_rewards() -> tuple[int, int, int]:
     )
 
 
-async def _evaluate_llm_rewards(
-    title: str,
-    description: Optional[str] = None,
-    priority: Optional[str] = None
-) -> Optional[tuple[int, int, int]]:
-    async def _with_timeout(coro):
-        try:
-            return await asyncio.wait_for(coro, timeout=LLM_TIMEOUT_SECONDS)
-        except Exception as exc:
-            logger.warning("LLM evaluation timed out or failed: %s", exc)
-            return None
-
-    priority_value = priority.value if isinstance(priority, TaskPriority) else priority
-
-    try:
-        results = await asyncio.gather(
-            _with_timeout(
-                complexity_evaluator.evaluate_task_complexity(
-                    title=title,
-                    description=description,
-                    priority=priority_value
-                )
-            ),
-            _with_timeout(
-                complexity_evaluator.evaluate_intelligence_reward(
-                    title=title,
-                    description=description
-                )
-            ),
-            _with_timeout(
-                complexity_evaluator.evaluate_satisfaction_reward(
-                    title=title,
-                    description=description
-                )
-            ),
-            return_exceptions=True
-        )
-        
-        # Проверяем, есть ли исключения в результатах
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.warning(f"LLM evaluation failed for result {i}: {result}")
-                return None
-            if result is None:
-                logger.warning(f"LLM evaluation returned None for result {i}")
-                return None
-
-        coins, intelligence, satisfaction = results
-
-        return _normalize_reward_values(coins, intelligence, satisfaction)
-    except Exception as e:
-        logger.warning(f"Ошибка при оценке наград через LLM: {e}")
-        return None
-
-
 async def _determine_task_rewards(
     title: str,
     description: Optional[str] = None,
     priority: Optional[TaskPriority] = None
 ) -> tuple[int, int, int]:
-    """Определить награды за задачу с fallback на заглушки при ошибках"""
-    try:
-        if not complexity_evaluator.is_llm_available():
-            logger.debug("LLM недоступен, используем заглушки")
-            return _get_stub_rewards()
-
-        llm_rewards = await _evaluate_llm_rewards(title, description, priority)
-        if llm_rewards:
-            return llm_rewards
-
-        # Если LLM вернул None, пробуем fallback
-        logger.debug("LLM вернул None, используем fallback награды")
-        fallback_coins, fallback_intelligence, fallback_satisfaction = await _calculate_task_rewards(
-            title=title,
-            description=description,
-            priority=priority.value if isinstance(priority, TaskPriority) else priority
-        )
-        return _normalize_reward_values(fallback_coins, fallback_intelligence, fallback_satisfaction)
-    except Exception as e:
-        logger.warning(f"Ошибка при определении наград для задачи '{title}': {e}. Используем заглушки.")
-        return _get_stub_rewards()
+    """Награды за задачу: оценка модели или запасные значения."""
+    _, rewards = await _assess_and_reward(
+        title,
+        description,
+        priority.value if isinstance(priority, TaskPriority) else priority,
+    )
+    return rewards
 
 
 async def _ensure_goal_exists(db: AsyncSession, goal_id: int) -> Goal:
@@ -371,32 +323,19 @@ async def create_task(
     if not _has_meaningful_text(title):
         raise HTTPException(status_code=400, detail="Название задачи должно быть более осмысленным")
     description = task_in.description.strip() if task_in.description else None
-    
-    # Проверяем задачу на спам
     try:
-        is_spam = await complexity_evaluator.is_task_spam(
+        is_spam, (reward_coins, reward_intelligence_points, reward_satisfaction) = await _assess_and_reward(
             title=title,
-            description=description
+            description=description,
+            priority=task_in.priority,
         )
-    except Exception as spam_exc:
-        logger.warning("Не удалось проверить задачу на спам: %s", spam_exc)
+    except Exception as reward_exc:
+        logger.error("Ошибка при оценке задачи '%s': %s", title, reward_exc, exc_info=True)
         is_spam = False
+        reward_coins, reward_intelligence_points, reward_satisfaction = _get_stub_rewards()
 
     if is_spam:
-        reward_coins = 0
-        reward_intelligence_points = 0
-        reward_satisfaction = 0
-    else:
-        try:
-            reward_coins, reward_intelligence_points, reward_satisfaction = await _determine_task_rewards(
-                title=title,
-                description=description,
-                priority=task_in.priority
-            )
-        except Exception as reward_exc:
-            logger.error(f"Ошибка при определении наград для задачи '{title}': {reward_exc}", exc_info=True)
-            # Используем заглушки при ошибке
-            reward_coins, reward_intelligence_points, reward_satisfaction = _get_stub_rewards()
+        reward_coins = reward_intelligence_points = reward_satisfaction = 0
     
     # Создаем задачу с автоматически вычисленной стоимостью
     try:
@@ -438,24 +377,17 @@ async def create_goal(
         raise HTTPException(status_code=400, detail="Название цели должно быть более осмысленным")
 
     try:
-        is_spam = await complexity_evaluator.is_task_spam(
+        is_spam, (reward_coins, reward_intelligence, reward_satisfaction) = await _assess_and_reward(
             title=goal_title,
-            description=goal_description
+            description=goal_description,
         )
     except Exception as spam_exc:
-        logger.warning("Не удалось проверить цель на спам: %s", spam_exc)
+        logger.warning("Не удалось оценить цель: %s", spam_exc)
         is_spam = False
+        reward_coins, reward_intelligence, reward_satisfaction = _get_stub_rewards()
 
     if is_spam:
         raise HTTPException(status_code=400, detail="Цель отмечена как спам")
-
-    reward_coins, reward_intelligence, reward_satisfaction = await _calculate_task_rewards(
-        title=goal_title,
-        description=goal_description
-    )
-    reward_coins, reward_intelligence, reward_satisfaction = _normalize_reward_values(
-        reward_coins, reward_intelligence, reward_satisfaction
-    )
 
     goal = Goal(
         user_id=user_id,
@@ -480,11 +412,17 @@ async def create_goal(
         if not sub_title:
             continue
         sub_description = item.get("description", "").strip() or None
-        coins, intelligence, satisfaction = await _calculate_task_rewards(
-            title=sub_title,
-            description=sub_description
-        )
-        coins, intelligence, satisfaction = _normalize_reward_values(coins, intelligence, satisfaction)
+        if all(item.get(key) is not None for key in ("reward_coins", "reward_intelligence", "reward_satisfaction")):
+            coins, intelligence, satisfaction = _normalize_reward_values(
+                item.get("reward_coins") or 0,
+                item.get("reward_intelligence") or 0,
+                item.get("reward_satisfaction") or 0,
+            )
+        else:
+            coins, intelligence, satisfaction = await _calculate_task_rewards(
+                title=sub_title,
+                description=sub_description
+            )
         goal_task = GoalTask(
             goal_id=goal.id,
             user_id=user_id,
@@ -563,23 +501,12 @@ async def update_goal(
         setattr(goal, field, value)
 
     if reward_recalculate:
-        try:
-            is_spam = await complexity_evaluator.is_task_spam(
-                title=goal.title,
-                description=goal.description
-            )
-        except Exception as spam_exc:
-            logger.warning("Не удалось проверить цель на спам при обновлении: %s", spam_exc)
-            is_spam = False
-
+        is_spam, (coins, intelligence, satisfaction) = await _assess_and_reward(
+            title=goal.title,
+            description=goal.description,
+        )
         if is_spam:
             raise HTTPException(status_code=400, detail="Цель отмечена как спам")
-
-        coins, intelligence, satisfaction = await _calculate_task_rewards(
-            title=goal.title,
-            description=goal.description
-        )
-        coins, intelligence, satisfaction = _normalize_reward_values(coins, intelligence, satisfaction)
         goal.reward_coins = coins
         goal.reward_intelligence_points = intelligence
         goal.reward_satisfaction = satisfaction
@@ -788,23 +715,13 @@ async def generate_task(
     
     # Генерируем задачу через LLM
     generated_task_data = await complexity_evaluator.generate_task()
-    
-    # Проверяем задачу на спам и оцениваем сложность
-    is_spam = await complexity_evaluator.is_task_spam(
+    is_spam, (reward_coins, reward_intelligence_points, reward_satisfaction) = await _assess_and_reward(
         title=generated_task_data["title"],
-        description=generated_task_data.get("description")
+        description=generated_task_data.get("description"),
+        priority=generated_task_data.get("priority"),
     )
-
     if is_spam:
-        reward_coins = 0
-        reward_intelligence_points = 0
-        reward_satisfaction = 0
-    else:
-        reward_coins, reward_intelligence_points, reward_satisfaction = await _determine_task_rewards(
-            title=generated_task_data["title"],
-            description=generated_task_data.get("description"),
-            priority=generated_task_data.get("priority")
-        )
+        reward_coins = reward_intelligence_points = reward_satisfaction = 0
     
     # Создаем задачу
     task = Task(
@@ -925,22 +842,16 @@ async def update_task(
     
     # Пересчитываем стоимость, если изменились поля сложности
     if complexity_fields_changed:
-        is_spam = await complexity_evaluator.is_task_spam(
+        is_spam, (reward_coins, reward_intelligence_points, reward_satisfaction) = await _assess_and_reward(
             title=task.title,
-            description=task.description
+            description=task.description,
+            priority=task.priority,
         )
-
         if is_spam:
             task.reward_coins = 0
             task.reward_intelligence_points = 0
             task.reward_satisfaction = 0
         else:
-            reward_coins, reward_intelligence_points, reward_satisfaction = await _determine_task_rewards(
-                title=task.title,
-                description=task.description,
-                priority=task.priority
-            )
-
             task.reward_coins = reward_coins
             task.reward_intelligence_points = reward_intelligence_points
             task.reward_satisfaction = reward_satisfaction
